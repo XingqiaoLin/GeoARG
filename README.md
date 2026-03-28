@@ -73,7 +73,7 @@ At inference, **only the student is used** — no structure required.
 ## Installation
 
 ```bash
-git clone https://github.com/ycclab/GeoARG.git
+git clone https://github.com/XingqiaoLin/GeoARG
 cd GeoARG
 
 conda create -n geoarg python=3.10 -y
