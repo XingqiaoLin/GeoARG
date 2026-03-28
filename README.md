@@ -15,7 +15,6 @@ Sequence-homology tools miss ARGs that have diverged beyond recognition — yet 
 - Identifies ARGs **across all four input types**: long/short nucleotide and amino acid sequences — no separate models needed
 - Detects remote homologs down to **<25% sequence identity** to known ARGs
 - Runs inference at **15.4× the speed** of the full structural model with no measurable performance loss
-- Applied to 49,707 unannotated gut metagenomic sequences → **1,485 high-confidence novel ARG candidates**
 
 ---
 
