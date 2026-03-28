@@ -63,14 +63,6 @@ At inference, **only the student is used** — no structure required.
 | HMD-ARG | 0.11 |
 | ARGNet | 0.02 |
 
-### Resistance Subtype Classification (36 classes)
-
-| Method | Accuracy |
-|--------|:--------:|
-| **GeoARG** | **0.8792** |
-| ARGNet | 0.7380 |
-| DeepARG | 0.6260 |
-
 ### Inference Efficiency
 
 | Model | Parameters | Time (s) | Speedup |
