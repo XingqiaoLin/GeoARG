@@ -164,7 +164,7 @@ python -m esm.scripts.fold -i sequences.fasta -o pdbs/ --tqdm
 
 ```
 GeoARG/
-├── models.py       # Teacher, Student, SE3GNN, CrossAttention, DistillationLoss
+├── models.py       # Teacher, Student, E3GNN, CrossAttention, DistillationLoss
 ├── train.py        # Two-phase training entry point
 ├── trainer.py      # Epoch-level train / eval loops
 ├── data.py         # Dataset, PDB→graph parser, collate_fn
