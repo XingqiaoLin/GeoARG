@@ -23,9 +23,9 @@ Sequence-homology tools miss ARGs that have diverged beyond recognition — yet 
 ## Architecture
 
 <div align="center">
-<img src="figures/workflow.png" width="900" alt="GeoARG Architecture"/>
+<img src="workflow.png" width="900" alt="GeoARG Architecture"/>
 </div>
-
+ 
 <br/>
 
 GeoARG follows a **teacher–student** design with three coordinated modules:
