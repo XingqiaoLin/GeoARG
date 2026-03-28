@@ -160,7 +160,7 @@ GeoARG/
 ├── data.py         # Dataset, PDB→graph parser, collate_fn
 ├── utils.py        # Metrics, seed, sequence utilities
 ├── workflow.png    # Architecture figure
-└── checkpoints/    # Saved model weights (.safetensors)
+└── checkpoints/    # Saved model weights (.safetensors) download from https://zenodo.org/records/19295211
 ```
 
 
