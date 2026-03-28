@@ -18,15 +18,10 @@ from utils import SEED, print_metrics, set_seed
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-TRAIN_CSV = "/content/drive/MyDrive/GeoARG/arg_train.csv"
-TEST_CSV  = "/content/drive/MyDrive/GeoARG/arg_test.csv"
-TRAIN_PDB = "/content/drive/MyDrive/GeoARG/train_pdbs"
-TEST_PDB  = "/content/drive/MyDrive/GeoARG/test_pdbs"
-SAVE_DIR  = "/content/drive/MyDrive/GeoARG"
 
-TEACHER_EPOCHS = 10
-STUDENT_EPOCHS = 10
-BATCH_SIZE     = 2
+TEACHER_EPOCHS = 20
+STUDENT_EPOCHS = 20
+BATCH_SIZE     = 4
 
 
 def build_dataloaders():
