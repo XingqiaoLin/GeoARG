@@ -135,7 +135,7 @@ SAVE_DIR  = "/path/to/checkpoints/"
 ```
 
 Training runs in two phases automatically:
-1. **Phase 1** — Teacher training (ESM2-650M backbone, last 4 layers unfrozen + SE3-GNN + CrossAttention)
+1. **Phase 1** — Teacher training (ESM2-650M backbone, last 4 layers unfrozen + E3-GNN + CrossAttention)
 2. **Phase 2** — Student distillation (ESM2-35M, teacher frozen)
 
 ### Predict structures with ESMFold
@@ -185,4 +185,7 @@ For single-sequence or batch prediction without local setup:
 Accepts FASTA input · Returns ARG probability, predicted resistance class, and confidence score.
 
 ---
+## License
 
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+```
