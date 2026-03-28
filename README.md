@@ -153,17 +153,18 @@ python -m esm.scripts.fold -i sequences.fasta -o pdbs/ --tqdm
 
 ## Repository Structure
 
+
 ```
 GeoARG/
-├── models.py        # GeoARGTeacher, GeoARGStudent, SE3GNN, CrossAttentionFusion, DistillationLoss
-├── train.py         # Two-phase training entry point
-├── trainer.py       # Epoch-level train/eval loops
-├── data.py        # GeoARGDataset, PDB → graph parser, collate_fn
-├── utils.py         # Metrics, seed, sequence utilities
-├── figures/
-│   └── workflow.png
-└── checkpoints/     # Saved model weights (.safetensors)
+├── models.py       # Teacher, Student, SE3GNN, CrossAttention, DistillationLoss
+├── train.py        # Two-phase training entry point
+├── trainer.py      # Epoch-level train / eval loops
+├── data.py         # Dataset, PDB→graph parser, collate_fn
+├── utils.py        # Metrics, seed, sequence utilities
+├── workflow.png    # Architecture figure
+└── checkpoints/    # Saved model weights (.safetensors)
 ```
+
 
 ---
 
