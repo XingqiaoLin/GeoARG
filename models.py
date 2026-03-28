@@ -1,4 +1,5 @@
 import contextlib
+import warnings
 
 import torch
 import torch.nn as nn
@@ -6,53 +7,130 @@ import torch.nn.functional as F
 import esm as esm_lib
 
 
-class SE3GNNLayer(nn.Module):
-    def __init__(self, node_dim: int, edge_dim: int, hidden_dim: int):
+
+class EGNNLayer(nn.Module):
+    """
+    单层 E(n)-等变消息传递（Satorras et al., ICML 2021）。
+
+    等变原理：
+      - 消息 m_ij 只依赖 ||x_i - x_j||²（纯标量）→ 旋转/平移/镜像不变
+      - 坐标更新 Δx_i = Σ_j (x_i-x_j)/dist · φ_x(m_ij) → E(3) 等变
+    """
+
+    def __init__(self, node_dim: int, hidden_dim: int):
         super().__init__()
-        self.msg_mlp = nn.Sequential(
-            nn.Linear(node_dim * 2 + edge_dim, hidden_dim), nn.ReLU(),
+        act = nn.SiLU
+
+        # φ_e: [h_i || h_j || sq_dist || plddt_j] → m_ij
+        self.edge_mlp = nn.Sequential(
+            nn.Linear(node_dim * 2 + 1 + 1, hidden_dim),
+            act(),
             nn.Linear(hidden_dim, hidden_dim),
+            act(),
         )
-        self.update_mlp = nn.Sequential(
-            nn.Linear(node_dim + hidden_dim, hidden_dim), nn.ReLU(),
+
+        # φ_x: m_ij → 坐标更新标量权重
+        self.coord_mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            act(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+        # φ_h: [h_i || 聚合消息] → 新节点特征
+        self.node_mlp = nn.Sequential(
+            nn.Linear(node_dim + hidden_dim, hidden_dim),
+            act(),
             nn.Linear(hidden_dim, node_dim),
         )
+
         self.norm = nn.LayerNorm(node_dim)
 
-    def forward(self, h, edge_index, edge_feat, plddt):
+    def forward(
+        self,
+        h: torch.Tensor,           # [N, node_dim]
+        x: torch.Tensor,           # [N, 3]  Cα 坐标
+        edge_index: torch.Tensor,  # [2, E]
+        plddt: torch.Tensor,       # [N]
+    ):
         src, dst = edge_index[0], edge_index[1]
-        msg      = self.msg_mlp(torch.cat([h[src], h[dst], edge_feat], dim=-1))
 
-        plddt_j   = plddt[dst].clamp(min=1e-6)
-        plddt_sum = torch.zeros(h.size(0), device=h.device)
-        plddt_sum.scatter_add_(0, dst, plddt_j)
-        w = plddt_j / (plddt_sum[dst] + 1e-8)
+        # 边消息
+        delta   = x[src] - x[dst]                              # [E, 3]
+        sq_dist = (delta ** 2).sum(dim=-1, keepdim=True)       # [E, 1]
+        plddt_j = plddt[dst].clamp(min=1e-6).unsqueeze(-1)     # [E, 1]
 
-        agg = torch.zeros(h.size(0), msg.size(-1), device=h.device)
-        agg.scatter_add_(0, dst.unsqueeze(-1).expand_as(msg), msg * w.unsqueeze(-1))
-        return self.norm(h + self.update_mlp(torch.cat([h, agg], dim=-1)))
+        m_ij = self.edge_mlp(
+            torch.cat([h[src], h[dst], sq_dist, plddt_j], dim=-1)
+        )  # [E, hidden_dim]
+
+        # plddt 归一化权重
+        raw_w = plddt[dst].clamp(min=1e-6)
+        w_sum = torch.zeros(h.size(0), device=h.device)
+        w_sum.scatter_add_(0, dst, raw_w)
+        w = raw_w / (w_sum[dst] + 1e-8)                        # [E]
+
+        # 坐标更新（等变）
+        coord_w  = self.coord_mlp(m_ij)                        # [E, 1]
+        unit_dir = delta / (sq_dist.sqrt() + 1e-8)             # [E, 3]
+        coord_agg = torch.zeros_like(x)
+        coord_agg.scatter_add_(
+            0,
+            dst.unsqueeze(-1).expand(-1, 3),
+            unit_dir * coord_w * w.unsqueeze(-1),
+        )
+        x_new = x + coord_agg
+
+        # 节点特征更新（不变）
+        feat_agg = torch.zeros(h.size(0), m_ij.size(-1), device=h.device)
+        feat_agg.scatter_add_(
+            0,
+            dst.unsqueeze(-1).expand_as(m_ij),
+            m_ij * w.unsqueeze(-1),
+        )
+        h_new = self.norm(h + self.node_mlp(torch.cat([h, feat_agg], dim=-1)))
+
+        return h_new, x_new
 
 
-class SE3GNN(nn.Module):
+class E3GNN(nn.Module):
+    """
+    多层 EGNN。
+
+    接口变化（相对于原 SE3GNN）：
+      - 去掉 edge_in 参数（不再需要预计算的 edge_feat）
+      - forward 签名改为 (node_feat, coords, edge_index, plddt)
+      - 返回值不变：(z_per_residue [N, out_dim], z_global [out_dim])
+    """
+
     def __init__(
         self,
-        node_in: int  = 27,
-        edge_in: int  = 28,
-        hidden:  int  = 512,
-        out_dim: int  = 512,
+        node_in:  int = 27,
+        hidden:   int = 512,
+        out_dim:  int = 512,
         n_layers: int = 6,
     ):
         super().__init__()
         self.input_proj  = nn.Linear(node_in, hidden)
-        self.layers      = nn.ModuleList([SE3GNNLayer(hidden, edge_in, hidden) for _ in range(n_layers)])
+        self.layers      = nn.ModuleList(
+            [EGNNLayer(hidden, hidden) for _ in range(n_layers)]
+        )
         self.output_proj = nn.Linear(hidden, out_dim)
 
-    def forward(self, node_feat, edge_index, edge_feat, plddt):
+    def forward(
+        self,
+        node_feat:  torch.Tensor,   # [N, node_in]
+        coords:     torch.Tensor,   # [N, 3]  真实 Cα 坐标
+        edge_index: torch.Tensor,   # [2, E]
+        plddt:      torch.Tensor,   # [N]
+    ):
         h = self.input_proj(node_feat)
+        x = coords.clone()
         for layer in self.layers:
-            h = layer(h, edge_index, edge_feat, plddt)
+            h, x = layer(h, x, edge_index, plddt)
         z_per_residue = self.output_proj(h)
         return z_per_residue, z_per_residue.mean(0)
+
+
 
 
 class ESM2Encoder(nn.Module):
@@ -93,6 +171,7 @@ class ESM2Encoder(nn.Module):
         return [self.proj(token_repr[i, 1:len(seq) + 1, :].float()) for i, seq in enumerate(sequences)]
 
 
+
 class CrossAttentionFusion(nn.Module):
     def __init__(self, dim: int = 512, n_heads: int = 8):
         super().__init__()
@@ -106,6 +185,8 @@ class CrossAttentionFusion(nn.Module):
         if N == L:
             return z_struc
         if N > L:
+            # parse_pdb_to_graph 里已做 residues[:MAX_SEQ_LEN]，正常不会触发
+            warnings.warn(f"_align: struct nodes ({N}) > seq len ({L}), truncating.")
             return z_struc[:L]
         pad = torch.zeros(L - N, z_struc.size(1), device=z_struc.device)
         return torch.cat([z_struc, pad], dim=0)
@@ -135,26 +216,30 @@ class ClassificationHead(nn.Module):
         return self.head(z)
 
 
+
 class GeoARGTeacher(nn.Module):
     def __init__(
         self,
-        num_classes:      int  = 2,
-        proj_dim:         int  = 512,
-        freeze_esm:       bool = True,
-        unfreeze_last_n:  int  = 4,
+        num_classes:     int  = 2,
+        proj_dim:        int  = 512,
+        freeze_esm:      bool = True,
+        unfreeze_last_n: int  = 4,
     ):
         super().__init__()
-        self.esm_enc = ESM2Encoder(proj_dim=proj_dim, freeze_esm=freeze_esm, unfreeze_last_n=unfreeze_last_n)
-        self.gnn     = SE3GNN(node_in=27, edge_in=28, hidden=512, out_dim=512, n_layers=6)
+        self.esm_enc = ESM2Encoder(proj_dim=proj_dim, freeze_esm=freeze_esm,
+                                    unfreeze_last_n=unfreeze_last_n)
+        self.gnn     = E3GNN(node_in=27, hidden=512, out_dim=512, n_layers=6)
         self.fusion  = CrossAttentionFusion(dim=512, n_heads=8)
         self.head    = ClassificationHead(in_dim=512, num_classes=num_classes)
 
     def forward(self, sequences, graph_data, device):
         z_seq = self.esm_enc(sequences, device)[0]
+
+        # coords 是 parse_pdb_to_graph 新增的字段
         z_per_res, _ = self.gnn(
             graph_data["node_feat"].to(device),
+            graph_data["coords"].to(device),       # ← E3GNN 新增
             graph_data["edge_index"].to(device),
-            graph_data["edge_feat"].to(device),
             graph_data["plddt"].to(device),
         )
         z_fusion = self.fusion(z_seq, z_per_res)
@@ -188,8 +273,9 @@ class GeoARGStudent(nn.Module):
         return self.head(z), z
 
 
+
 class DistillationLoss(nn.Module):
-    def __init__(self, lambda1: float = 1.0, lambda2: float = 1.0, temperature: float = 4.0):
+    def __init__(self, lambda1: float = 1.0, lambda2: float = 0.1, temperature: float = 4.0):
         super().__init__()
         self.lambda1 = lambda1
         self.lambda2 = lambda2
