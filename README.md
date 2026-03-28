@@ -20,7 +20,7 @@ Sequence-homology tools miss ARGs that have diverged beyond recognition — yet 
 
 ---
 
-## Architecture
+## Architecture#
 
 <div align="center">
 <img src="workflow.png" width="900" alt="GeoARG Architecture"/>
