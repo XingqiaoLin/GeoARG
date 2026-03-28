@@ -91,22 +91,32 @@ pip install fair-esm biopython safetensors tqdm scikit-learn
 
 ### Inference
 
-```python
-import torch
-from models import GeoARGStudent
-from safetensors.torch import load_file
+Run `infer.py` to predict ARGs from a FASTA file:
 
-device = torch.device("cuda")
-student = GeoARGStudent(num_classes=2, proj_dim=512).to(device)
-student.load_state_dict(load_file("checkpoints/student_best.safetensors"))
-student.eval()
-
-sequences = ["MKKFTREDWLNKLMG..."]
-with torch.no_grad():
-    logits, z = student(sequences, device)
-    prob = torch.softmax(logits, dim=-1)[1].item()
-    print(f"ARG probability: {prob:.4f}")
+```bash
+python infer.py \
+    --fasta sequences.fasta \
+    --base_model /path/to/checkpoints/merged_model \
+    --out_csv predictions.csv \
+    --local_files_only
 ```
+
+Key arguments:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--fasta` | — | Input protein FASTA file(s) |
+| `--base_model` | `facebook/esm2_t12_35M_UR50D` | HF model name or local checkpoint path |
+| `--out_csv` | — | Output CSV path |
+| `--thr` | `0.5` | Decision threshold on predicted probability |
+| `--batch_size` | `4` | Sequences per batch |
+| `--max_length` | `1022` | Tokenizer max length (ESM2 standard) |
+| `--dtype` | `float32` | Model dtype: `float32` / `float16` / `bfloat16` |
+| `--device` | auto | `cuda` or `cpu` |
+| `--local_files_only` | — | Load model from local cache only (no network) |
+
+Output CSV columns (binary classification): `seq_id`, `prob`, `pred`
+
 
 ### Training
 
