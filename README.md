@@ -34,7 +34,7 @@
 ## 🏗️ Architecture
 
 <div align="center">
-<img src="workflow.png" width="900" alt="GeoARG Architecture"/>
+<img src="model.png" width="900" alt="GeoARG Architecture"/>
 </div>
 
 <br/>
