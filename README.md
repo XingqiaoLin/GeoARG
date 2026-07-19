@@ -2,7 +2,7 @@
 
 # GeoARG
 
-**Geometry-Enhanced Protein Language Modeling Enables Discovery of Novel Antibiotic Resistance Genes**
+**Uncovering remote antibiotic resistance genes from metagenomics with geometric deep learning**
 
 <br/>
 
