@@ -12,8 +12,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crossvalidate
+import search_after_date
 from crossvalidate import OUTPUT_FIELDS, classify, dump, flag_label
-from lib import SKILL_VERSION, exit_code_for_run, parse_date, require_day, rotate_existing, sort_by_date, vs_cutoff, write_tsv
+from lib import (
+    SKILL_VERSION,
+    dedup_key,
+    exit_code_for_run,
+    parse_date,
+    parse_pubmed_xml,
+    require_day,
+    rotate_existing,
+    sort_by_date,
+    vs_cutoff,
+    write_tsv,
+)
+from queries import PROFILES, alias_variants, epmc_queries, expand_aliases, pubmed_queries
+from screen_candidates import screen_text
 
 
 def check(cond: bool, message: str) -> None:
@@ -285,6 +299,178 @@ def test_write_empty_not_index_error() -> None:
         check(text.splitlines()[0] == "\t".join(OUTPUT_FIELDS), text)
 
 
+PUBMED_XML = """<PubmedArticleSet><PubmedArticle>
+<MedlineCitation><PMID>42075228</PMID><Article>
+<Journal><Title>Microorganisms</Title>
+<JournalIssue><PubDate><Year>2026</Year><Month>Apr</Month></PubDate></JournalIssue></Journal>
+<ArticleTitle>Identification of MPN_080 as a Novel Determinant</ArticleTitle>
+<Abstract><AbstractText>Overexpression increased MICs.</AbstractText></Abstract>
+<ArticleDate DateType="Electronic"><Year>2026</Year><Month>04</Month><Day>05</Day></ArticleDate>
+<PublicationTypeList><PublicationType>Journal Article</PublicationType></PublicationTypeList>
+</Article></MedlineCitation>
+<PubmedData><ArticleIdList>
+<ArticleId IdType="doi">10.3390/microorganisms14040831</ArticleId>
+<ArticleId IdType="pmc">PMC13118816</ArticleId>
+</ArticleIdList></PubmedData>
+</PubmedArticle></PubmedArticleSet>"""
+
+
+def test_query_profiles() -> None:
+    counts = {}
+    for profile in PROFILES:
+        queries = epmc_queries(profile)
+        names = [name for name, _ in queries]
+        check(len(names) == len(set(names)), f"{profile} has duplicate query names")
+        check(all("{date}" in query for _n, query in queries), f"{profile} missing date placeholder")
+        counts[profile] = len(queries)
+        pm = pubmed_queries(profile)
+        check(all("{date}" in query for _n, query in pm), f"{profile} pubmed missing date")
+        check(len(pm) >= 3, f"{profile} pubmed too few")
+    check(counts["broad"] > counts["core"], counts)
+    check(counts["max"] > counts["broad"], counts)
+    try:
+        epmc_queries("nope")
+    except ValueError as exc:
+        check("unknown profile" in str(exc), exc)
+    else:
+        raise SystemExit("FAIL: unknown profile should raise")
+
+
+def test_query_covers_more_classes() -> None:
+    joined = " ".join(query for _n, query in epmc_queries("broad"))
+    for term in ("vancomycin", "tigecycline", "rifampi", "trimethoprim", "efflux pump", "SRC:\"PPR\""):
+        check(term in joined, f"broad profile missing {term}")
+
+
+def test_alias_variants() -> None:
+    variants = alias_variants("blaKPC-249")
+    for expected in ("blaKPC-249", "KPC-249", "bla_KPC-249", "bla-KPC-249"):
+        check(expected in variants, f"{expected} missing from {variants}")
+    variants = alias_variants("ant(9)-If")
+    check("ant9-If" in variants, variants)
+    check("ant(9)-If" == variants[0], variants)
+    expanded = expand_aliases(["Lsa(F)", "lsaF"], limit=6)
+    check(len(expanded) == 6 and expanded[0] == "Lsa(F)", expanded)
+
+
+def test_pubmed_xml_parse() -> None:
+    rows = parse_pubmed_xml(PUBMED_XML)
+    check(len(rows) == 1, rows)
+    row = rows[0]
+    check(row["pmid"] == "42075228", row)
+    check(row["doi"] == "10.3390/microorganisms14040831", row)
+    check(row["firstPublicationDate"] == "2026-04-05", row)
+    check("MPN_080" in row["title"], row)
+    check("MICs" in row["abstractText"], row)
+    check(row["pubTypeList"]["pubType"] == ["Journal Article"], row)
+    check(row["journalInfo"]["journal"]["title"] == "Microorganisms", row)
+
+
+def test_dedup_key() -> None:
+    a = {"doi": "10.1/ABC", "pmid": "1", "source": "MED", "id": "1"}
+    b = {"doi": "10.1/abc.", "pmid": "2", "source": "PPR", "id": "9"}
+    check(dedup_key(a) == dedup_key(b), (dedup_key(a), dedup_key(b)))
+    check(dedup_key({"pmid": "7"}) == "pmid:7", dedup_key({"pmid": "7"}))
+    check(dedup_key({"source": "PPR", "id": "X"}) == "PPR:X", "fallback key")
+
+
+def test_date_clauses() -> None:
+    check(
+        search_after_date.epmc_date_clause("2026-03-29", "2026-09-06")
+        == "FIRST_PDATE:[2026-03-29 TO 2026-09-06]",
+        "epmc clause",
+    )
+    check("3000-01-01" in search_after_date.epmc_date_clause("2026-03-29", None), "open ended")
+    clause = search_after_date.pubmed_date_clause("2026-03-29", "2026-09-06")
+    check(clause == '"2026/03/29"[EDAT] : "2026/09/06"[EDAT]', clause)
+
+
+def test_extra_queries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "q.txt"
+        path.write_text(
+            "# comment\nq_named\tTITLE:\"blaZZZ-1\"\nTITLE:\"unnamed query\"\n",
+            encoding="utf-8",
+        )
+        got = search_after_date.load_extra_queries(path, ["TITLE:\"cli\""])
+        names = [n for n, _q in got]
+        check(names[0] == "q_user_01", got)
+        check("q_named" in names, got)
+        check(len(got) == 3, got)
+
+
+def test_window_status() -> None:
+    ws = search_after_date.window_status
+    check(ws("2026-04-05", "day", "2026-03-29", "2026-09-06") == "in_window", "inside")
+    check(ws("2026-02-27", "day", "2026-03-29", "2026-09-06") == "before_since", "older EDAT hit")
+    check(ws("2026-10-01", "day", "2026-03-29", "2026-09-06") == "after_until", "past until")
+    check(ws("", "missing", "2026-03-29", None) == "unknown", "no date")
+    check(ws("2026-03", "month", "2026-03-29", None) == "unresolved", "coarse date")
+
+
+def test_screen_rejects_bare_stems() -> None:
+    """Broader vocabulary must not match author names or unrelated acronyms."""
+    for title, abstract in [
+        ("From 2-Azido Products to Complex Heterocycles: the Ugi MCR in Modern Synthesis", "A new MCR route."),
+        ("A novel biomarker reported by van Dijk and colleagues", "New cohort analysis."),
+        ("Cryo-EM structural analysis of liposome-reconstituted AcrB", "Novel substrate density maps."),
+    ]:
+        got = screen_text(title, abstract)
+        check(got["promoted"] is False, f"{title}: {got}")
+
+
+def test_screen_score_ranks_named_genes_first() -> None:
+    named = screen_text(
+        "Phenotypic and molecular characterization of a novel blaKPC-202 variant",
+        "The gene was cloned into E. coli and raised meropenem MICs.",
+    )
+    generic = screen_text(
+        "Antibiotic resistance trends in a regional hospital network",
+        "Susceptibility testing showed a novel rise in resistance rates.",
+    )
+    check(named["screen_score"] > generic["screen_score"], (named, generic))
+    check(named["evidence_hint"] == "gene_level_language", named)
+    check(screen_text("", "")["screen_score"] == 0, "empty title scores 0")
+
+
+def test_screen_excludes_eukaryote_and_review_framing() -> None:
+    for title in [
+        "Antimicrobial Resistance Across the Farm-to-Fork Continuum: A One Health Perspective",
+        "Advances on anti-cancer combination therapies targeting DNA repair",
+        "AI agent-based discovery of antimicrobial peptides against resistant bacteria",
+        "Ferroptosis key genes and immune infiltration in Legionnaires' disease",
+    ]:
+        got = screen_text(title, "Novel resistance gene analysis with MIC testing.")
+        check(got["promoted"] is False, f"{title}: {got}")
+
+
+def test_screen_weak_tier() -> None:
+    weak = screen_text(
+        "A genome survey of blaOXA-1422, a designated class D beta-lactamase allele",
+        "The allele was found in a canine bite wound isolate collection.",
+    )
+    check(weak["screen_status"] == "review_candidate_weak", weak)
+    check(weak["promoted"] is False, weak)
+    strong = screen_text(
+        "A novel carbapenemase blaGUA-1 confers resistance in Pseudomonas",
+        "Cloning into E. coli raised meropenem MICs.",
+    )
+    check(strong["screen_status"] == "review_candidate", strong)
+    check(strong["promoted"] is True, strong)
+    off = screen_text("Piperacillin-tazobactam versus colistin for pneumonia", "A clinical trial.")
+    check(off["screen_status"] == "not_candidate", off)
+
+
+def test_screen_broader_vocabulary() -> None:
+    for title, abstract in [
+        ("A novel vanM-like glycopeptide resistance gene cluster", "Knockout lowered vancomycin MIC."),
+        ("tet(X8), a new tigecycline resistance determinant", "Heterologous expression raised MICs."),
+        ("Novel efflux pump gene tmexCD5 confers multidrug resistance", "Complementation restored resistance."),
+    ]:
+        got = screen_text(title, abstract)
+        check(got["screen_status"] == "review_candidate", f"{title}: {got}")
+
+
 def main() -> None:
     test_parse_date()
     test_require_day()
@@ -301,6 +487,19 @@ def main() -> None:
     test_month_date_raw_in_output()
     test_rerun_rotates_previous()
     test_error_row_keeps_raw_and_version()
+    test_query_profiles()
+    test_query_covers_more_classes()
+    test_alias_variants()
+    test_pubmed_xml_parse()
+    test_dedup_key()
+    test_date_clauses()
+    test_extra_queries()
+    test_window_status()
+    test_screen_rejects_bare_stems()
+    test_screen_score_ranks_named_genes_first()
+    test_screen_excludes_eukaryote_and_review_framing()
+    test_screen_weak_tier()
+    test_screen_broader_vocabulary()
     print("offline checks passed")
 
 

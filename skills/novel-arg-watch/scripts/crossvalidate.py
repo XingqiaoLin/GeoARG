@@ -38,6 +38,7 @@ from lib import (
     new_run_id,
     parse_date,
     provenance,
+    pubmed_search,
     rec_date_info,
     require_day,
     rotate_existing,
@@ -47,6 +48,7 @@ from lib import (
     write_json,
     write_tsv,
 )
+from queries import expand_aliases
 
 TITLE_QUERY = 'TITLE:"{alias}"'
 ABS_QUERY = 'ABSTRACT:"{alias}"'
@@ -54,6 +56,7 @@ ABS_QUERY = 'ABSTRACT:"{alias}"'
 OUTPUT_FIELDS = [
     "gene",
     "aliases",
+    "alias_variants",
     "since",
     "formal_date",
     "formal_date_raw",
@@ -74,6 +77,8 @@ OUTPUT_FIELDS = [
     "seq_search_complete",
     "epmc_reported",
     "epmc_retrieved",
+    "pubmed_reported",
+    "pubmed_retrieved",
     "exact_mentions",
     "title_mentions",
     "deciding_record",
@@ -88,8 +93,12 @@ OUTPUT_FIELDS = [
 
 def title_query(aliases: list[str]) -> str:
     parts = [TITLE_QUERY.format(alias=a) for a in aliases]
-    parts += [ABS_QUERY.format(alias=a) for a in aliases[:3]]
+    parts += [ABS_QUERY.format(alias=a) for a in aliases[:6]]
     return "(" + " OR ".join(parts) + ")"
+
+
+def pubmed_term(aliases: list[str]) -> str:
+    return "(" + " OR ".join(f'"{alias}"[tiab]' for alias in aliases) + ")"
 
 
 def isolate_only_mention(title: str, aliases: list[str], pattern) -> bool:
@@ -208,14 +217,29 @@ def review_one(
     context: str,
     accessions: list[str],
     run_id: str,
+    use_pubmed: bool = True,
 ) -> dict:
-    pattern = mention_re(aliases)
+    variants = expand_aliases(aliases)
+    pattern = mention_re(variants)
     context_re = re.compile(context, re.I) if context else None
-    query = title_query(aliases)
-    page = epmc_search(query, page_size=50, max_pages=8)
-    matched = []
+    query = title_query(variants)
+    page = epmc_search(query, page_size=100, max_pages=8)
+    rows = [("epmc", row) for row in page.rows]
+
+    pubmed_reported = 0
+    pubmed_retrieved = 0
+    pubmed_complete = True
+    if use_pubmed:
+        pm = pubmed_search(pubmed_term(variants), batch=100, max_records=400)
+        rows += [("pubmed", row) for row in pm.rows]
+        pubmed_reported = pm.hit_count
+        pubmed_retrieved = pm.retrieved
+        pubmed_complete = pm.complete
+
+    matched: list[dict] = []
+    seen_keys: set[str] = set()
     unresolved_lit = False
-    for row in page.rows:
+    for source_db, row in rows:
         title = clean(row.get("title", ""))
         abstract = clean(row.get("abstractText", ""))
         blob = f"{title} {abstract}"
@@ -223,6 +247,10 @@ def review_one(
             continue
         if context_re and not context_re.search(blob):
             continue
+        key = (row.get("doi") or "").lower() or f"{row.get('source')}:{row.get('id')}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         parsed = rec_date_info(row)
         relation = vs_cutoff(parsed.normalized, parsed.precision, since) if parsed.normalized else "unknown"
         if relation == "unresolved":
@@ -231,6 +259,7 @@ def review_one(
             {
                 "id": row.get("id"),
                 "source": row.get("source"),
+                "source_db": source_db,
                 "date": parsed.normalized if parsed.precision == PRECISION_DAY else "",
                 "date_raw": parsed.original,
                 "date_normalized": parsed.normalized,
@@ -282,7 +311,7 @@ def review_one(
         bool(articles_before),
         unresolved_lit,
         bool(seq_before),
-        page.complete,
+        page.complete and pubmed_complete,
         seq_complete,
     )
 
@@ -299,6 +328,7 @@ def review_one(
     return {
         "gene": gene,
         "aliases": ";".join(aliases),
+        "alias_variants": ";".join(variants),
         "since": since,
         "formal_date": formal if formal_precision == PRECISION_DAY else "",
         "formal_date_raw": formal_raw,
@@ -315,10 +345,12 @@ def review_one(
         "preprint_before_since": bool(preprints_before),
         "article_before_since": bool(articles_before),
         "provisional_sequence_before_since": bool(seq_before),
-        "lit_search_complete": page.complete,
+        "lit_search_complete": page.complete and pubmed_complete,
         "seq_search_complete": seq_complete,
         "epmc_reported": page.hit_count,
         "epmc_retrieved": page.retrieved,
+        "pubmed_reported": pubmed_reported,
+        "pubmed_retrieved": pubmed_retrieved,
         "exact_mentions": len(matched),
         "title_mentions": len(title_hits),
         "deciding_record": json.dumps(deciding or {}, ensure_ascii=False),
@@ -371,6 +403,11 @@ def main() -> None:
     ap.add_argument("--since", required=True)
     ap.add_argument("--genes", type=Path, required=True, help="TSV with gene, aliases, formal_date, ncbi_term")
     ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument(
+        "--no-pubmed",
+        action="store_true",
+        help="Europe PMC only. Narrower; use when PubMed is unreachable.",
+    )
     args = ap.parse_args()
     since = require_day(args.since, "--since")
     run_id = new_run_id()
@@ -387,6 +424,7 @@ def main() -> None:
             "since": since,
             "genes_file": str(args.genes),
             "output": str(args.output),
+            "sources": ["epmc"] if args.no_pubmed else ["epmc", "pubmed"],
             "rotated_previous": rotated,
             "n_input": len(items),
             "n_written": 0,
@@ -410,6 +448,7 @@ def main() -> None:
                 item["context"],
                 item["accessions"],
                 run_id,
+                use_pubmed=not args.no_pubmed,
             )
         except Exception as exc:  # noqa: BLE001 — keep the rest of the run
             row = {field: "" for field in OUTPUT_FIELDS}
@@ -417,6 +456,7 @@ def main() -> None:
                 {
                     "gene": item["gene"],
                     "aliases": ";".join(item["aliases"]),
+                    "alias_variants": ";".join(expand_aliases(item["aliases"])),
                     "since": since,
                     "formal_date": item["formal_date"] if item["formal_date_precision"] == PRECISION_DAY else "",
                     "formal_date_raw": item["formal_date_raw"],

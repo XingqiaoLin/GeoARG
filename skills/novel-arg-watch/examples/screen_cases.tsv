@@ -7,3 +7,9 @@ First detection of blaNDM-1 in hospital wastewater in Region X	PCR detected blaN
 Piperacillin-tazobactam versus colistin for ventilator-associated pneumonia	A clinical trial of existing drugs.	Journal Article	not_candidate
 Novel plasmid pCM3 harboring the aph(3) gene confers phosphorylation-driven streptomycin resistance	A new plasmid encoding aph(3); biochemical phosphorylation assay.	Journal Article	review_candidate
 Persistence of a Novel mcr-10.6 Allele in Enterobacter across a wastewater system	WGS detected mcr-10.6; isolate colistin MIC was recorded.	Journal Article	review_candidate
+A novel vanM-like glycopeptide resistance gene cluster in Enterococcus faecium	Knockout lowered the vancomycin MIC eightfold.	Journal Article	review_candidate
+tet(X8), a new tigecycline resistance determinant from swine manure	Heterologous expression in E. coli raised tigecycline MICs.	Preprint	review_candidate
+Novel plasmid-borne rmtF2 methyltransferase confers aminoglycoside resistance	Cloning the gene raised amikacin MICs in the recipient strain.	Journal Article	review_candidate
+A genome survey of blaOXA-1422, a designated class D beta-lactamase allele	The allele was found in a canine bite wound isolate collection.	Journal Article	review_candidate_weak
+Global prevalence of vancomycin resistance genes in enterococci: a meta-analysis	Pooled prevalence across 120 studies of vanA and vanB.	Journal Article;Meta-Analysis	exclude_review
+Rifampicin dosing strategies in tuberculosis treatment outcomes	A retrospective cohort of treatment regimens.	Journal Article	not_candidate

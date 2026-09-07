@@ -221,7 +221,9 @@ Accepts FASTA input · Returns ARG probability, predicted resistance class, and 
 python skills/novel-arg-watch/scripts/verify.py
 ```
 
-All skill files live at [`skills/novel-arg-watch/`](https://github.com/XingqiaoLin/GeoARG/tree/main/skills/novel-arg-watch). Cursor and Codex load that folder through local links.
+All skill files live at [`skills/novel-arg-watch/`](https://github.com/XingqiaoLin/GeoARG/tree/main/skills/novel-arg-watch). Copy that folder to `.cursor/skills/` for Cursor or `~/.codex/skills/` for Codex.
+
+It sweeps Europe PMC and PubMed with queries chunked by drug class and gene family, keeps preprints, and ranks screened candidates so the most likely new genes are read first.
 
 Scripts in the skill never mark a gene as a finished novel ARG. Sequence download is not part of the default run.
 

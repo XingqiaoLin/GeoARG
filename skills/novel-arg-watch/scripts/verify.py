@@ -36,7 +36,14 @@ def check_frontmatter() -> None:
         fail("frontmatter name")
     if "description:" not in block:
         fail("frontmatter description")
-    for name in ("search_after_date.py", "crossvalidate.py", "screen_candidates.py", "lib.py", "test_offline.py"):
+    for name in (
+        "search_after_date.py",
+        "crossvalidate.py",
+        "screen_candidates.py",
+        "queries.py",
+        "lib.py",
+        "test_offline.py",
+    ):
         if not (SCRIPTS / name).exists():
             fail(f"missing script {name}")
     if not (SKILL_DIR / "reference.md").exists():
@@ -47,8 +54,12 @@ def check_screen_fixtures() -> None:
     path = SKILL_DIR / "examples" / "screen_cases.tsv"
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
-    if len(rows) < 6:
+    if len(rows) < 12:
         fail("screen fixtures too few")
+    statuses = {row["expected_status"] for row in rows}
+    for needed in ("review_candidate", "review_candidate_weak", "exclude_review", "not_candidate"):
+        if needed not in statuses:
+            fail(f"screen fixtures missing a {needed} case")
     for row in rows:
         got = screen_text(row["title"], row.get("abstract", ""), row.get("publication_types", ""))
         expected = row["expected_status"]

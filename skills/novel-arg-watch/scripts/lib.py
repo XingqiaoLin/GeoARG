@@ -21,9 +21,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-UA = "GeoARG-novel-arg-watch/1.2.0"
+UA = "GeoARG-novel-arg-watch/1.3.0"
 SKILL_NAME = "novel-arg-watch"
-SKILL_VERSION = "1.2.0"
+SKILL_VERSION = "1.3.0"
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SLEEP = 0.3
@@ -151,7 +151,7 @@ class SearchPage:
     complete: bool
 
 
-def epmc_search(query: str, page_size: int = 100, max_pages: int = 40) -> SearchPage:
+def epmc_search(query: str, page_size: int = 1000, max_pages: int = 40) -> SearchPage:
     """Paginate Europe PMC. Never stop at the first page."""
     rows: list[dict] = []
     cursor = "*"
@@ -228,6 +228,153 @@ def eutils_esearch(db: str, term: str, retmax: int = 20) -> tuple[list[str], int
     return ids, count
 
 
+def _xml_text(node) -> str:
+    if node is None:
+        return ""
+    return clean("".join(node.itertext()))
+
+
+def _pubmed_article_date(article) -> str:
+    """Electronic article date first, then the print issue date."""
+    for path in ('.//ArticleDate[@DateType="Electronic"]', ".//ArticleDate"):
+        node = article.find(path)
+        if node is not None:
+            year = _xml_text(node.find("Year"))
+            month = _xml_text(node.find("Month"))
+            day = _xml_text(node.find("Day"))
+            if year and month and day:
+                return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+    node = article.find(".//Journal/JournalIssue/PubDate")
+    if node is None:
+        node = article.find('.//PubMedPubDate[@PubStatus="epublish"]')
+    if node is None:
+        node = article.find('.//PubMedPubDate[@PubStatus="pubmed"]')
+    if node is None:
+        return ""
+    year = _xml_text(node.find("Year"))
+    month = _xml_text(node.find("Month"))
+    day = _xml_text(node.find("Day"))
+    if not year:
+        return _xml_text(node.find("MedlineDate"))
+    months = {name: i for i, name in enumerate(calendar.month_abbr) if name}
+    if month:
+        num = months.get(month[:3].title(), 0) or (int(month) if month.isdigit() else 0)
+        if num and day:
+            return f"{int(year):04d}-{num:02d}-{int(day):02d}"
+        if num:
+            return f"{int(year):04d}-{num:02d}"
+    return f"{int(year):04d}"
+
+
+def parse_pubmed_xml(text: str) -> list[dict]:
+    """Turn a PubMed efetch payload into Europe-PMC-shaped records."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(text)
+    rows: list[dict] = []
+    for article in root.findall(".//PubmedArticle"):
+        pmid = _xml_text(article.find(".//PMID"))
+        doi = ""
+        for node in article.findall('.//ArticleId[@IdType="doi"]'):
+            doi = _xml_text(node)
+        pmcid = ""
+        for node in article.findall('.//ArticleId[@IdType="pmc"]'):
+            pmcid = _xml_text(node)
+        abstract = " ".join(
+            _xml_text(node) for node in article.findall(".//Abstract/AbstractText")
+        ).strip()
+        types = [_xml_text(node) for node in article.findall(".//PublicationType")]
+        rows.append(
+            {
+                "id": pmid,
+                "source": "MED",
+                "pmid": pmid,
+                "pmcid": pmcid,
+                "doi": doi,
+                "title": _xml_text(article.find(".//ArticleTitle")),
+                "abstractText": abstract,
+                "journalInfo": {"journal": {"title": _xml_text(article.find(".//Journal/Title"))}},
+                "firstPublicationDate": _pubmed_article_date(article),
+                "pubTypeList": {"pubType": types},
+            }
+        )
+    return rows
+
+
+def get_text(url: str, data: bytes | None = None) -> str:
+    last: Exception | None = None
+    for attempt in range(RETRIES):
+        try:
+            req = urllib.request.Request(url, data=data, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last = exc
+            time.sleep(SLEEP * (2**attempt))
+    raise RuntimeError(f"request failed after {RETRIES} tries: {url}") from last
+
+
+def pubmed_search(term: str, batch: int = 200, max_records: int = 10000) -> SearchPage:
+    """Paginate PubMed esearch, then efetch full records in batches."""
+    ids: list[str] = []
+    total = 0
+    pages = 0
+    retstart = 0
+    while retstart < max_records:
+        qs = urllib.parse.urlencode(
+            {
+                "db": "pubmed",
+                "term": term,
+                "retmax": str(batch),
+                "retstart": str(retstart),
+                "retmode": "json",
+            }
+        )
+        payload = get_json(f"{EUTILS}/esearch.fcgi?{qs}")
+        time.sleep(SLEEP)
+        pages += 1
+        result = payload.get("esearchresult", {})
+        total = int(result.get("count") or 0)
+        found = [uid for uid in result.get("idlist", []) if uid]
+        ids.extend(found)
+        if not found or len(ids) >= total:
+            break
+        retstart += batch
+
+    rows: list[dict] = []
+    for i in range(0, len(ids), batch):
+        body = urllib.parse.urlencode(
+            {"db": "pubmed", "id": ",".join(ids[i : i + batch]), "retmode": "xml"}
+        ).encode()
+        text = get_text(f"{EUTILS}/efetch.fcgi", data=body)
+        time.sleep(SLEEP)
+        rows.extend(parse_pubmed_xml(text))
+
+    truncated = total > len(ids)
+    return SearchPage(
+        rows=rows,
+        hit_count=total,
+        retrieved=len(rows),
+        truncated=truncated,
+        pages=pages,
+        complete=not truncated,
+    )
+
+
+def dedup_key(row: dict) -> str:
+    """One key per publication, so Europe PMC and PubMed rows collapse."""
+    doi = clean(str(row.get("doi") or "")).lower().rstrip(".")
+    if doi:
+        return f"doi:{doi}"
+    pmid = clean(str(row.get("pmid") or ""))
+    if pmid:
+        return f"pmid:{pmid}"
+    pmcid = clean(str(row.get("pmcid") or ""))
+    if pmcid:
+        return f"pmcid:{pmcid.lower()}"
+    return f"{row.get('source', '')}:{row.get('id', '')}"
+
+
 def eutils_esummary(db: str, ids: list[str]) -> list[dict]:
     if not ids:
         return []
@@ -270,7 +417,14 @@ def git_head(path: Path) -> str:
 def provenance(script: str) -> dict[str, Any]:
     scripts_dir = Path(__file__).resolve().parent
     skill_dir = scripts_dir.parent
-    files = ["lib.py", "crossvalidate.py", "search_after_date.py", "screen_candidates.py", "SKILL.md"]
+    files = [
+        "lib.py",
+        "queries.py",
+        "crossvalidate.py",
+        "search_after_date.py",
+        "screen_candidates.py",
+        "SKILL.md",
+    ]
     hashes = {}
     for name in files:
         path = scripts_dir / name if name.endswith(".py") else skill_dir / name

@@ -54,6 +54,15 @@ Two papers on OXA-1054 are one gene. A paper that lists five OXA numbers is five
 | Isolate MIC plus PCR/WGS detection | no |
 | Computational prediction or catalog membership | no |
 
+## Coverage
+
+Recall comes before precision in retrieval, because a paper the sweep never returned cannot be recovered later, while a false positive is dropped in one screening pass.
+
+- two sources: Europe PMC (journals and preprints) and PubMed
+- queries chunked by drug class and by gene family, so no single query is truncated
+- gene tokens always carry a family suffix or number. A bare stem is not searchable: `MCR` matches multicomponent-reaction chemistry, `van` matches Dutch author names, `cat` and `sul` match ordinary words
+- PubMed is searched by `EDAT`, so out-of-window papers appear. They are labelled `in_window=before_since`, not deleted; an earlier paper naming the gene is the point of the date gate
+
 ## Automatic exclusions
 
 - reviews and meta-analyses

@@ -25,7 +25,6 @@ This folder is the whole skill. Copy it, or open a repo that already contains it
 
 | Tool | Where it should live |
 | --- | --- |
-| This repo | `skills/novel-arg-watch/` |
 | Cursor | `.cursor/skills/novel-arg-watch/` |
 | Codex | `.agents/skills/novel-arg-watch/` or `~/.codex/skills/novel-arg-watch/` |
 
@@ -70,9 +69,29 @@ python $SKILL_DIR/scripts/search_after_date.py \
   --output-dir path/to/watch_YYYY-MM-DD
 ```
 
-- Paginate Europe PMC. Do not stop at the first 1000 hits.
-- Keep preprints (`SRC:PPR`) in the hit table. They are evidence, not automatically eligible.
+Two sources run by default: Europe PMC (journals plus `SRC:PPR` preprints) and PubMed. Queries are chunked by drug class and gene family, so one crowded query cannot hit the pagination ceiling and hide records.
+
+| Flag | Default | Use |
+| --- | --- | --- |
+| `--profile` | `broad` | `core` is fastest, `max` is widest and slowest |
+| `--sources` | `epmc,pubmed` | drop one if it is unreachable |
+| `--page-size` | `1000` | Europe PMC page size |
+| `--max-pages` | `40` | raise it when a query reports `truncated` |
+| `--max-records` | `10000` | per-query PubMed cap |
+| `--extra-query` | — | one more Europe PMC query; repeatable |
+| `--query-file` | — | file of extra queries, optional `name<TAB>query` |
+
+Widen further without editing the skill:
+
+```bash
+python $SKILL_DIR/scripts/search_after_date.py --since YYYY-MM-DD \
+  --profile max --extra-query 'TITLE_ABS:"blaZZZ"' \
+  --output-dir path/to/watch_YYYY-MM-DD
+```
+
+- Keep preprints in the hit table. They are evidence, not automatically eligible.
 - Formal date basis: first online / `firstPublicationDate`. Keep issue dates only for checking.
+- `in_window` says how each row relates to `--since` / `--until`. PubMed is searched by `EDAT`, an indexing date, so a paper first published earlier can come back. Those rows say `before_since` and are kept on purpose: an older paper that already names the gene is what step 4 needs.
 - Read `search_audit.json`. If `search_complete` is false, later “no hit” is `insufficient_evidence`, not absence.
 - Non-zero exit: do not treat the hit table as a finished search.
 
@@ -86,13 +105,20 @@ python $SKILL_DIR/scripts/screen_candidates.py \
 
 `review_candidate` / `promoted=true` only means the paper is worth naming genes. It is not experimental validation.
 
-Exclude on title/abstract when the script says:
+Rows come out sorted by `screen_score` (0–100), highest first, so a wide sweep stays readable. Score rises with a coined gene name, naming language, and gene-level wording; `evidence_hint` says which of those fired. The score ranks; it never decides.
 
-- `exclude_review`
-- `exclude_offtopic` (inhibitor, drug, phage, `sp. nov.`)
-- `exclude_known_report` (first regional / new plasmid / known gene, no novel-gene language)
+| `screen_status` | Meaning |
+| --- | --- |
+| `review_candidate` | ARG plus novelty plus function language; name the genes |
+| `review_candidate_weak` | names a gene or says “designated”, but no function wording; skim these, they are not promoted |
+| `exclude_review` | review, meta-analysis, perspective, “advances in” |
+| `exclude_offtopic` | inhibitor, phage, `sp. nov.`, peptide, antifungal, anti-cancer, plant extract |
+| `exclude_known_report` | first regional report / new plasmid of a **known** gene |
+| `not_candidate` | keywords only |
 
-Golden cases: `$SKILL_DIR/examples/screen_cases.tsv`. `verify.py` checks them.
+Do not skip `review_candidate_weak`. A paper that names a new allele in a genome survey often has no MIC wording in the abstract.
+
+Screening reads the abstract, so run it on a `search_hits.tsv` that has one. Golden cases: `$SKILL_DIR/examples/screen_cases.tsv`. `verify.py` checks them.
 
 ### 3. Name the object
 
@@ -109,7 +135,7 @@ python $SKILL_DIR/scripts/crossvalidate.py \
   --output path/to/watch_YYYY-MM-DD/crossvalidate.tsv
 ```
 
-Exact alias match in title or abstract only. Literature dates can exclude. NCBI `CreateDate` plus the **current** title cannot prove the name existed on that day.
+Europe PMC and PubMed are both queried per gene; `--no-pubmed` narrows it to Europe PMC. Each alias is expanded to its spelling variants (`blaKPC-249`, `KPC-249`, `bla_KPC-249`, `ant(9)-If` → `ant9-If`) and the list used is written to `alias_variants`. Exact alias match in title or abstract only. Literature dates can exclude. NCBI `CreateDate` plus the **current** title cannot prove the name existed on that day.
 
 | `date_gate` | Meaning | Script print | `novel_for_cutoff` |
 | --- | --- | --- | --- |
@@ -137,5 +163,7 @@ Do not start sequence download after a date-only request. Sequence helpers are n
 ## Output
 
 Lead with DROP, then HOLD, then OPEN. Never present the search-hit count as the novel-ARG count. Never treat script `OPEN` or `promoted` as a determined novel ARG.
+
+Never present `screen_score` as a novelty score; it only orders the reading queue.
 
 Each row carries `skill_version` and `run_id`. `*.run.json` also records `argv`, Python version, and SHA-256 of the skill files. Re-running the same output path moves the previous file to `*.bak-<run_id>.*` instead of overwriting it. Month/year dates stay in `formal_date_raw`; `formal_date` is day-precision only.

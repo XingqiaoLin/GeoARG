@@ -1,7 +1,8 @@
 When the user asks to find novel antimicrobial resistance genes after a date, or to cross-check preprints against formal papers, use the `novel-arg-watch` skill.
 
-Canonical files: `skills/novel-arg-watch/`
-Cursor and Codex load the same folder through `.cursor/skills/novel-arg-watch` and `.agents/skills/novel-arg-watch`.
+All skill files: `skills/novel-arg-watch/`
+
+To load it as an installed skill, copy that folder to `.cursor/skills/novel-arg-watch/` (Cursor) or `~/.codex/skills/novel-arg-watch/` (Codex).
 
 Verify before a live search:
 
