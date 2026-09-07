@@ -215,17 +215,25 @@ Accepts FASTA input · Returns ARG probability, predicted resistance class, and 
 
 ## 🛠️ Agent skill (Cursor / Codex)
 
-`novel-arg-watch` searches papers after a cutoff date and cross-validates first public appearance. A formal paper after the cutoff is not enough if a preprint or earlier article already named the same ARG.
+`novel-arg-watch` searches papers after a cutoff date and puts every named gene through two gates:
+
+| Gate | Question | Fails when |
+|------|----------|-----------|
+| **Date** | Was anything about this gene public before the cutoff? | a preprint or earlier article already named it |
+| **Evidence** | Did the paper prove the gene causes resistance? | only an isolate MIC, a purified enzyme, a plasmid transfer, or a prediction |
+
+The evidence gate reads the open-access full text and keeps only sentences where the gene name, a gene-level experiment, and a susceptibility change appear together — then hands back that sentence. A claim with no quotable sentence does not pass, and wording found only in an abstract does not either.
 
 ```bash
-python skills/novel-arg-watch/scripts/verify.py
+python skills/novel-arg-watch/scripts/verify.py            # offline self-test
+python skills/novel-arg-watch/scripts/install.py --codex   # or --cursor
 ```
 
-All skill files live at [`skills/novel-arg-watch/`](https://github.com/XingqiaoLin/GeoARG/tree/main/skills/novel-arg-watch). Copy that folder to `.cursor/skills/` for Cursor or `~/.codex/skills/` for Codex.
+All skill files live at [`skills/novel-arg-watch/`](https://github.com/XingqiaoLin/GeoARG/tree/main/skills/novel-arg-watch). Python 3.9+, standard library only, no API key.
 
-It sweeps Europe PMC and PubMed with queries chunked by drug class and gene family, keeps preprints, and ranks screened candidates so the most likely new genes are read first.
+Retrieval sweeps Europe PMC and PubMed with queries chunked by drug class and gene family, keeps preprints, and ranks screened candidates so the most likely new genes are read first.
 
-Scripts in the skill never mark a gene as a finished novel ARG. Sequence download is not part of the default run.
+Scripts in the skill never mark a gene as a finished novel ARG; a passing row means a human has a quote to check. Sequence download is not part of the default run.
 
 ---
 

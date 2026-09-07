@@ -21,9 +21,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-UA = "GeoARG-novel-arg-watch/1.3.0"
+UA = "GeoARG-novel-arg-watch/1.4.0"
 SKILL_NAME = "novel-arg-watch"
-SKILL_VERSION = "1.3.0"
+SKILL_VERSION = "1.4.0"
+MIN_PYTHON = (3, 9)
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SLEEP = 0.3
@@ -308,6 +309,12 @@ def get_text(url: str, data: bytes | None = None) -> str:
             req = urllib.request.Request(url, data=data, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=120) as resp:
                 return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            # 404 means the record has no open-access text. Retrying cannot change that.
+            if exc.code in (400, 401, 403, 404, 410):
+                raise RuntimeError(f"http {exc.code}: {url}") from exc
+            last = exc
+            time.sleep(SLEEP * (2**attempt))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last = exc
             time.sleep(SLEEP * (2**attempt))
@@ -359,6 +366,76 @@ def pubmed_search(term: str, batch: int = 200, max_records: int = 10000) -> Sear
         pages=pages,
         complete=not truncated,
     )
+
+
+EPMC_FULLTEXT = "https://www.ebi.ac.uk/europepmc/webservices/rest/{ident}/fullTextXML"
+
+
+@dataclass
+class FullText:
+    available: bool
+    pmcid: str
+    sections: list[tuple[str, str]]
+    error: str = ""
+
+
+def epmc_fulltext(pmcid: str) -> FullText:
+    """Open-access full text for one PMC record, kept as (section, text) pairs."""
+    import xml.etree.ElementTree as ET
+
+    ident = pmcid if pmcid.upper().startswith("PMC") else f"PMC{pmcid}"
+    url = EPMC_FULLTEXT.format(ident=ident)
+    try:
+        raw = get_text(url)
+    except RuntimeError as exc:
+        return FullText(available=False, pmcid=ident, sections=[], error=str(exc))
+    if not raw.lstrip().startswith("<"):
+        return FullText(available=False, pmcid=ident, sections=[], error="not xml")
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        return FullText(available=False, pmcid=ident, sections=[], error=f"parse: {exc}")
+
+    sections: list[tuple[str, str]] = []
+    for node in root.iter("abstract"):
+        text = clean("".join(node.itertext()))
+        if text:
+            sections.append(("Abstract", text))
+    for sec in root.iter("sec"):
+        title_node = sec.find("title")
+        title = clean("".join(title_node.itertext())) if title_node is not None else "Body"
+        parts = [clean("".join(p.itertext())) for p in sec.findall("p")]
+        text = " ".join(part for part in parts if part)
+        if text:
+            sections.append((title or "Body", text))
+    for cap in root.iter("caption"):
+        text = clean("".join(cap.itertext()))
+        if text:
+            sections.append(("Figure/Table caption", text))
+    if not sections:
+        body = clean("".join(root.itertext()))
+        if body:
+            sections.append(("Body", body))
+    return FullText(available=bool(sections), pmcid=ident, sections=sections)
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\u0391-\u03c9])")
+_ABBREV_TAIL = re.compile(r"\b(?:e\.g|i\.e|cf|vs|Fig|Figs|Tab|approx|spp|sp|subsp|str|no|et al)\.$", re.I)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Sentence split that does not break on common abbreviations or `E. coli`."""
+    text = clean(text)
+    if not text:
+        return []
+    pieces = _SENTENCE_SPLIT.split(text)
+    out: list[str] = []
+    for piece in pieces:
+        if out and (_ABBREV_TAIL.search(out[-1]) or re.search(r"\b[A-Z]\.$", out[-1])):
+            out[-1] = f"{out[-1]} {piece}"
+        else:
+            out.append(piece)
+    return [s.strip() for s in out if s.strip()]
 
 
 def dedup_key(row: dict) -> str:
@@ -423,6 +500,7 @@ def provenance(script: str) -> dict[str, Any]:
         "crossvalidate.py",
         "search_after_date.py",
         "screen_candidates.py",
+        "validate_evidence.py",
         "SKILL.md",
     ]
     hashes = {}

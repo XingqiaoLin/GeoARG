@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crossvalidate
 import search_after_date
+import validate_evidence
 from crossvalidate import OUTPUT_FIELDS, classify, dump, flag_label
 from lib import (
     SKILL_VERSION,
@@ -23,6 +25,7 @@ from lib import (
     require_day,
     rotate_existing,
     sort_by_date,
+    split_sentences,
     vs_cutoff,
     write_tsv,
 )
@@ -353,6 +356,14 @@ def test_alias_variants() -> None:
     check(len(expanded) == 6 and expanded[0] == "Lsa(F)", expanded)
 
 
+def test_alias_variants_drop_hyphen() -> None:
+    """Papers write blaKPC249 in running text, so the hyphenless form must match."""
+    variants = alias_variants("blaKPC-249")
+    for needed in ("blaKPC-249", "KPC-249", "blaKPC249", "KPC249"):
+        check(needed in variants, f"{needed} missing from {variants}")
+    check("mcr10.6" in alias_variants("mcr-10.6"), alias_variants("mcr-10.6"))
+
+
 def test_pubmed_xml_parse() -> None:
     rows = parse_pubmed_xml(PUBMED_XML)
     check(len(rows) == 1, rows)
@@ -471,6 +482,201 @@ def test_screen_broader_vocabulary() -> None:
         check(got["screen_status"] == "review_candidate", f"{title}: {got}")
 
 
+def test_split_sentences() -> None:
+    text = "The gene was cloned into E. coli DH5a. MICs rose 64-fold (Fig. 2A). Purified protein was assayed."
+    got = split_sentences(text)
+    check(len(got) == 3, got)
+    check("E. coli DH5a" in got[0], got)
+    check(got[1].startswith("MICs rose"), got)
+    check(split_sentences("") == [], "empty text")
+
+
+def test_evidence_requires_gene_in_same_window() -> None:
+    """An experiment sentence that never names the gene is not evidence."""
+    pattern = validate_evidence.mention_re(["blaXYZ-1"])
+    windows = validate_evidence.build_windows(
+        [("Results", "A knockout mutant showed a 32-fold decrease in the meropenem MIC.")]
+    )
+    label, quotes, _counts, _body = validate_evidence.classify_windows(windows, pattern)
+    check(label == "no_evidence_found", label)
+    check(quotes == [], quotes)
+
+
+def test_evidence_two_sentence_window() -> None:
+    pattern = validate_evidence.mention_re(["blaGUA-1"])
+    windows = validate_evidence.build_windows(
+        [("Results", "The blaGUA-1 gene was cloned into pET28a. MICs of ceftazidime increased 32-fold.")]
+    )
+    label, quotes, _counts, in_body = validate_evidence.classify_windows(windows, pattern)
+    check(label == "gene_level_causal", label)
+    check(quotes and "blaGUA-1" in quotes[0]["quote"], quotes)
+    check(quotes[0]["section"] == "Results", quotes)
+    check(in_body is True, "Results is body text")
+
+
+def test_pcr_is_not_a_plasmid_name() -> None:
+    """A case-insensitive plasmid pattern read `PCR` as the vector `pCR`."""
+    check(not validate_evidence.PLASMID_NAME.search("PCR screening was performed"), "PCR matched")
+    for good in ("pET28a", "pUC19", "pHSG398", "pMD19", "pSET2", "pUCP24", "pAM401"):
+        check(bool(validate_evidence.PLASMID_NAME.search(f"cloned into {good} and assayed")), good)
+    pattern = validate_evidence.mention_re(["Lsa(F)"])
+    windows = validate_evidence.build_windows(
+        [
+            (
+                "Prevalence",
+                "To evaluate the prevalence of the Lsa(F) gene, PCR screening was performed on 26 isolates. "
+                "Genes linked to decreased susceptibility to tiamulin were also investigated.",
+            )
+        ]
+    )
+    label, _quotes, _counts, _body = validate_evidence.classify_windows(windows, pattern)
+    check(label == "cooccurrence_only", f"PCR prevalence should not be causal, got {label}")
+
+
+def test_recombinant_strain_counts_as_gene_level() -> None:
+    """Real miss: `recombinant strain ... 32-fold increase in MIC` was scored biochemical."""
+    pattern = validate_evidence.mention_re(["ant(9)-If"])
+    text = (
+        "Compared with the control strain JH2-2/pAM401, the recombinant strain JH2-2/pAM401-ant(9)-If "
+        "demonstrated a 32-fold increase in the MIC of spectinomycin. ANT(9)-If demonstrated high catalytic "
+        "efficiency with a kcat/Km value of 8.78e4."
+    )
+    windows = validate_evidence.build_windows([("Results", text)])
+    label, quotes, _counts, _body = validate_evidence.classify_windows(windows, pattern)
+    check(label == "gene_level_causal", f"expected gene_level_causal, got {label}")
+    check("32-fold" in quotes[0]["quote"], quotes[0]["quote"][:80])
+
+
+def test_abstract_only_evidence_is_not_a_pass() -> None:
+    pattern = validate_evidence.mention_re(["blaGUA-1"])
+    windows = validate_evidence.build_windows(
+        [("Abstract", "Heterologous expression of blaGUA-1 increased the ceftazidime MIC 32-fold.")]
+    )
+    label, _quotes, _counts, in_body = validate_evidence.classify_windows(windows, pattern)
+    check(label == "gene_level_causal", label)
+    check(in_body is False, "abstract is not body")
+    check(
+        validate_evidence.novel_call("no_earlier_record_found", "validated_gene_level_abstract_only")
+        == "hold_abstract_only_evidence",
+        "abstract-only must not pass",
+    )
+
+
+def test_quote_ranking_prefers_body_and_fold_change() -> None:
+    weak = validate_evidence.quote_strength("Abstract", "The gene conferred resistance to tiamulin.")
+    strong = validate_evidence.quote_strength(
+        "Results", "The gene was cloned into pSET2 and the MIC increased eightfold, an 8-fold change."
+    )
+    check(strong > weak, f"{strong} !> {weak}")
+    screening = validate_evidence.quote_strength("Results", "PCR screening showed decreased susceptibility.")
+    check(strong > screening, f"{strong} !> {screening}")
+
+
+def test_evidence_fixtures() -> None:
+    path = Path(__file__).resolve().parent.parent / "examples" / "evidence_cases.tsv"
+    with path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    check(len(rows) >= 8, "evidence fixtures too few")
+    seen = set()
+    for row in rows:
+        aliases = [a.strip() for a in row["aliases"].split(";") if a.strip()]
+        pattern = validate_evidence.mention_re(validate_evidence.expand_aliases(aliases))
+        windows = validate_evidence.build_windows([("Results", row["text"])])
+        label, quotes, _counts, _body = validate_evidence.classify_windows(windows, pattern)
+        check(label == row["expected_class"], f"{row['gene']}: expected {row['expected_class']}, got {label}")
+        if label == "gene_level_causal":
+            check(bool(quotes), f"{row['gene']}: gene_level_causal without a quote")
+        seen.add(label)
+    for needed in ("gene_level_causal", "biochemical_only", "cooccurrence_only", "no_evidence_found"):
+        check(needed in seen, f"evidence fixtures missing {needed}")
+
+
+def test_validation_status_mapping() -> None:
+    for label, status in validate_evidence.VALIDATION_BY_CLASS.items():
+        if label == "gene_level_causal":
+            check(status == "validated_gene_level", status)
+        else:
+            check(status.startswith("not_validated"), f"{label} -> {status}")
+
+
+def test_only_gene_level_can_pass() -> None:
+    """Nothing except body-level causal evidence may reach a pass call."""
+    statuses = set(validate_evidence.VALIDATION_BY_CLASS.values()) | {
+        "insufficient_evidence",
+        "abstract_claim_only",
+        "validated_gene_level_abstract_only",
+    }
+    passing = {
+        status
+        for status in statuses
+        if validate_evidence.novel_call("no_earlier_record_found", status)
+        == "pass_date_gate_and_gene_level_evidence"
+    }
+    check(passing == {"validated_gene_level"}, f"unexpected passing statuses: {passing}")
+
+
+def test_novel_call_needs_both_gates() -> None:
+    call = validate_evidence.novel_call
+    check(
+        call("no_earlier_record_found", "validated_gene_level") == "pass_date_gate_and_gene_level_evidence",
+        "both gates pass",
+    )
+    check(call("preprint_before_since", "validated_gene_level") == "drop_earlier_public_record", "date drop wins")
+    check(call("no_earlier_record_found", "insufficient_evidence") == "hold_no_full_text", "no full text")
+    check(
+        call("no_earlier_record_found", "not_validated_cooccurrence") == "hold_not_gene_level_evidence",
+        "cooccurrence is not validation",
+    )
+    check(
+        call("no_earlier_record_found", "abstract_claim_only") == "hold_abstract_only_evidence",
+        "abstract claim is not validation",
+    )
+    check(
+        call("provisional_sequence_before_since", "validated_gene_level") == "hold_date_gate_unresolved",
+        "provisional date gate holds",
+    )
+    check(call("", "validated_gene_level") == "hold_date_gate_not_run", "no date gate")
+
+
+def test_no_absolute_paths_in_skill() -> None:
+    """A skill that hard-codes one machine's paths is not portable."""
+    skill_dir = Path(__file__).resolve().parent.parent
+    # Assembled from fragments so this check does not flag its own source line.
+    pattern = re.compile("|".join(["/" + "work/", "/" + "Users/", "/" + "home/[a-z]", "[A-Z]:" + re.escape("\\\\")]))
+    bad = []
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file() or path.suffix not in {".py", ".md", ".yaml", ".tsv"}:
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if pattern.search(line):
+                bad.append(f"{path.relative_to(skill_dir)}:{lineno}: {line.strip()[:80]}")
+    check(not bad, "absolute paths found:\n" + "\n".join(bad))
+
+
+def test_stdlib_only() -> None:
+    """Codex users may have nothing installed, so third-party imports are out."""
+    scripts = Path(__file__).resolve().parent
+    allowed = {
+        "argparse", "calendar", "csv", "dataclasses", "datetime", "hashlib", "html",
+        "json", "pathlib", "re", "shutil", "subprocess", "sys", "tempfile", "time",
+        "typing", "urllib", "uuid", "xml", "collections", "itertools", "functools",
+        "os", "textwrap", "unicodedata", "__future__",
+    }
+    local = {p.stem for p in scripts.glob("*.py")}
+    bad = []
+    for path in sorted(scripts.glob("*.py")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            match = re.match(r"\s*(?:import|from)\s+([A-Za-z_][\w.]*)", line)
+            if not match:
+                continue
+            root = match.group(1).split(".")[0]
+            if root not in allowed and root not in local:
+                bad.append(f"{path.name}:{lineno}: {root}")
+    check(not bad, "non-stdlib imports: " + "; ".join(bad))
+
+
 def main() -> None:
     test_parse_date()
     test_require_day()
@@ -490,6 +696,7 @@ def main() -> None:
     test_query_profiles()
     test_query_covers_more_classes()
     test_alias_variants()
+    test_alias_variants_drop_hyphen()
     test_pubmed_xml_parse()
     test_dedup_key()
     test_date_clauses()
@@ -500,6 +707,19 @@ def main() -> None:
     test_screen_excludes_eukaryote_and_review_framing()
     test_screen_weak_tier()
     test_screen_broader_vocabulary()
+    test_split_sentences()
+    test_evidence_requires_gene_in_same_window()
+    test_evidence_two_sentence_window()
+    test_evidence_fixtures()
+    test_pcr_is_not_a_plasmid_name()
+    test_recombinant_strain_counts_as_gene_level()
+    test_abstract_only_evidence_is_not_a_pass()
+    test_quote_ranking_prefers_body_and_fold_change()
+    test_validation_status_mapping()
+    test_only_gene_level_can_pass()
+    test_novel_call_needs_both_gates()
+    test_no_absolute_paths_in_skill()
+    test_stdlib_only()
     print("offline checks passed")
 
 

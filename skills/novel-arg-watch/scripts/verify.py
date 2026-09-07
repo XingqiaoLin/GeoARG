@@ -40,14 +40,41 @@ def check_frontmatter() -> None:
         "search_after_date.py",
         "crossvalidate.py",
         "screen_candidates.py",
+        "validate_evidence.py",
         "queries.py",
         "lib.py",
+        "install.py",
         "test_offline.py",
     ):
         if not (SCRIPTS / name).exists():
             fail(f"missing script {name}")
     if not (SKILL_DIR / "reference.md").exists():
         fail("missing reference.md")
+    for name in ("screen_cases.tsv", "evidence_cases.tsv"):
+        if not (SKILL_DIR / "examples" / name).exists():
+            fail(f"missing examples/{name}")
+
+
+def check_python_version() -> None:
+    from lib import MIN_PYTHON
+
+    if sys.version_info < MIN_PYTHON:
+        fail(f"needs Python {'.'.join(map(str, MIN_PYTHON))}+, running {sys.version.split()[0]}")
+
+
+def check_scripts_have_help() -> None:
+    """Anyone picking this up should be able to read --help without a network."""
+    import subprocess
+
+    for name in ("search_after_date.py", "screen_candidates.py", "crossvalidate.py", "validate_evidence.py"):
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / name), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            fail(f"{name} --help exited {proc.returncode}: {proc.stderr.strip()[:200]}")
 
 
 def check_screen_fixtures() -> None:
@@ -91,9 +118,11 @@ def check_screen_missing_title_exits() -> None:
 
 
 def main() -> None:
+    check_python_version()
     check_frontmatter()
     check_screen_fixtures()
     check_screen_missing_title_exits()
+    check_scripts_have_help()
     test_offline.main()
     print(f"verify passed ({SKILL_DIR})")
 

@@ -32,7 +32,7 @@ Do not auto-drop on RefSeq WP protein `CreateDate`. An unnamed CDS deposited bef
 
 ## Same named object
 
-Merge records that use the same official or paper-designated name, including `bla` prefixes and trivial punctuation (`KPC-249`, `blaKPC-249`, `bla_KPC-249`).
+Merge records that use the same official or paper-designated name, including `bla` prefixes and trivial punctuation (`KPC-249`, `blaKPC-249`, `bla_KPC-249`). Running text also drops the hyphen (`blaKPC249`), so alias expansion covers that form; without it the cloning sentence in the KPC-249 paper is invisible.
 
 Two papers on OXA-1054 are one gene. A paper that lists five OXA numbers is five objects.
 
@@ -51,8 +51,27 @@ Two papers on OXA-1054 are one gene. A paper that lists five OXA numbers is five
 | --- | --- |
 | Heterologous expression / complementation / knockout that changes MIC of that gene | yes, gene-level causal |
 | Purified-enzyme kinetics without a cell phenotype | biochemical only |
+| Conjugation or plasmid transfer plus MIC | no — the whole plasmid moved |
 | Isolate MIC plus PCR/WGS detection | no |
 | Computational prediction or catalog membership | no |
+
+## The quote rule
+
+`validate_evidence.py` decides these classes from the paper's own text, and it may only say `validated_gene_level` when it can hand back the sentence. The requirements, in order:
+
+1. **The gene name is in the window.** A methods sentence about "a knockout mutant" that never names the gene proves nothing about this gene. Windows are one or two consecutive sentences, so a claim split across a sentence boundary still counts.
+2. **A gene-level manipulation.** Cloning into a vector, a named plasmid, heterologous or over-expression, knockout, complementation, or a cloning host such as DH5α, BL21, TOP10, JH2-2, RN4220 carrying the gene. AST quality-control strains (ATCC 25922 and friends) are excluded on purpose: they appear in surveillance papers that never touch the gene.
+3. **A susceptibility outcome.** An MIC, a fold change, conferred or reduced resistance, a restored phenotype, a zone of inhibition.
+4. **Body text, not just the abstract.** Gene-level wording found only in the abstract or a figure caption yields `validated_gene_level_abstract_only`, which does not pass. Papers do overclaim in summaries.
+
+Both gates must clear before a gene is reportable: `no_earlier_record_found` **and** `validated_gene_level`. That combination is `pass_date_gate_and_gene_level_evidence`. It still needs a human to read the quote, because a regex cannot tell whether the control was the right one.
+
+Two failure modes this gate is tuned against, both found on real papers:
+
+- a case-insensitive plasmid pattern read the word `PCR` as the vector `pCR`, which promoted prevalence screening to causal evidence
+- "the recombinant strain … demonstrated a 32-fold increase in the MIC" was scored biochemical-only because the manipulation vocabulary only covered "recombinant plasmid"
+
+Both are pinned by fixtures in `examples/evidence_cases.tsv`.
 
 ## Coverage
 

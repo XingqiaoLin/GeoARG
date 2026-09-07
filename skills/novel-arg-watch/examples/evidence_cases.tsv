@@ -1,0 +1,13 @@
+gene	aliases	text	expected_class
+blaGUA-1	GUA-1;blaGUA-1	The blaGUA-1 gene was cloned into Escherichia coli DH5a and the transformant showed a 64-fold increase in the ceftazidime MIC.	gene_level_causal
+blaGUA-1	GUA-1;blaGUA-1	The blaGUA-1 gene was cloned into pET28a. MICs of ceftazidime increased 32-fold over the empty-vector control.	gene_level_causal
+ngt-1	Ngt-1;ngt-1	The ngt-1 knockout mutant showed a 16-fold decrease in the MIC of novobiocin compared with the parent strain.	gene_level_causal
+OXA-1422	OXA-1422;blaOXA-1422	Purified OXA-1422 enzyme hydrolysed nitrocefin with a catalytic efficiency of 0.2 per micromolar per second.	biochemical_only
+blaKPC-249	KPC-249;blaKPC-249	Conjugation transferred the blaKPC-249 plasmid to PAO1rifR and the transconjugant MIC rose to 64 mg/L.	mobilization_only
+mcr-10.6	mcr-10.6	mcr-10.6 was detected in twelve isolates by whole-genome sequencing and colistin MICs were recorded for each.	cooccurrence_only
+BAS-1	BAS-1;blaBAS-1	The BAS-1 sequence was predicted to encode a class A beta-lactamase by in silico analysis.	computational_only
+blaOXA-1422	blaOXA-1422;OXA-1422	blaOXA-1422 was present in the assembly of strain Capfe1863a0.	no_evidence_found
+blaXYZ-1	blaXYZ-1	A knockout mutant showed a 32-fold decrease in the meropenem MIC.	no_evidence_found
+blaKPC249	KPC-249;blaKPC249;blaKPC-249	The DH5a-blaKPC249 of E. coli DH5a carrying the blaKPC249 gene showed resistance to ceftazidime-avibactam.	gene_level_causal
+ant(9)-If	ant(9)-If	Compared with the control strain JH2-2/pAM401, the recombinant strain JH2-2/pAM401-ant(9)-If demonstrated a 32-fold increase in the MIC of spectinomycin.	gene_level_causal
+mcr-9	mcr-9	mcr-9 was detected in isolates that showed resistance to colistin, with E. coli ATCC 25922 as the quality control strain for susceptibility testing.	cooccurrence_only

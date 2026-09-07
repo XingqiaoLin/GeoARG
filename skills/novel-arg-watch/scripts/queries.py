@@ -10,6 +10,8 @@ crowded query cannot hit the pagination ceiling and silently drop records.
 
 from __future__ import annotations
 
+import re
+
 PROFILES = ("core", "broad", "max")
 DEFAULT_PROFILE = "broad"
 
@@ -396,8 +398,8 @@ def pubmed_queries(profile: str = DEFAULT_PROFILE) -> list[tuple[str, str]]:
 def alias_variants(alias: str) -> list[str]:
     """Spelling variants of one gene name, most specific first.
 
-    `blaKPC-249` also appears as `bla_KPC-249`, `bla-KPC-249`, and `KPC-249`.
-    `ant(9)-If` also appears as `ant9-If`.
+    `blaKPC-249` also appears as `bla_KPC-249`, `bla-KPC-249`, `KPC-249`, and
+    `blaKPC249`. `ant(9)-If` also appears as `ant9-If`.
     """
     seen: list[str] = []
 
@@ -423,6 +425,10 @@ def alias_variants(alias: str) -> list[str]:
         add(alias.replace("_", "-"))
     if "-" in alias:
         add(alias.replace("-", "_"))
+        # Papers drop the hyphen in running text: blaKPC-249 -> blaKPC249.
+        for value in list(seen):
+            if "-" in value and re.search(r"-\d", value):
+                add(value.replace("-", ""))
     return seen
 
 
