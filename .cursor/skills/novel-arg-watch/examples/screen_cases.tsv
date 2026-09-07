@@ -1,0 +1,9 @@
+title	abstract	publication_types	expected_status
+Cloning and molecular characterization of ant(9)-If: a novel aminoglycoside adenylyltransferase gene conferring resistance to spectinomycin	The gene was cloned into E. coli and MICs of spectinomycin increased.	Journal Article	review_candidate
+Beyond Ribosomal Mutations: Identification of MPN_080 as a Novel ATPase-Dependent Determinant of Macrolide Resistance in Mycoplasma pneumoniae	Knockout and complementation changed macrolide MICs.	Journal Article	review_candidate
+A systematic review of carbapenemase epidemiology in Enterobacterales	This review summarizes known blaKPC and blaNDM genes.	Review	exclude_review
+Bacillus linxq sp. nov., an antibacterial isolate from soil	The species showed antimicrobial activity against Staphylococcus.	Journal Article	exclude_offtopic
+First detection of blaNDM-1 in hospital wastewater in Region X	PCR detected blaNDM-1 in wastewater isolates.	Journal Article	exclude_known_report
+Piperacillin-tazobactam versus colistin for ventilator-associated pneumonia	A clinical trial of existing drugs.	Journal Article	not_candidate
+Novel plasmid pCM3 harboring the aph(3) gene confers phosphorylation-driven streptomycin resistance	A new plasmid encoding aph(3); biochemical phosphorylation assay.	Journal Article	review_candidate
+Persistence of a Novel mcr-10.6 Allele in Enterobacter across a wastewater system	WGS detected mcr-10.6; isolate colistin MIC was recorded.	Journal Article	review_candidate

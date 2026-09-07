@@ -1,0 +1,22 @@
+gene	aliases	formal_date	ncbi_term	context	accessions
+KPC-249	KPC-249;blaKPC-249;bla_KPC-249	2026-02-27	KPC-249[Title] OR blaKPC-249	KPC|beta-lactamase|carbapenemase|bla	PQ763404;NG_244519
+MPN_080	MPN_080;MPN-080	2026-04-05	MPN_080[Title]	macrolide|Mycoplasma|ATPase|resistance	
+ant(9)-If	ant(9)-If;ANT(9)-If;ant9-If	2026-04-07	ant(9)-If[Title] OR PX485637[Accession]		PX485637
+OXA-1181	OXA-1181;blaOXA-1181;bla_OXA-1181	2026-04-10	OXA-1181[Title] OR blaOXA-1181		OP966822;NG_149665
+OXA-1201	OXA-1201;blaOXA-1201;bla_OXA-1201	2026-04-10	OXA-1201[Title] OR blaOXA-1201		OQ858941;NG_203405
+OXA-1205	OXA-1205;blaOXA-1205;bla_OXA-1205	2026-04-10	OXA-1205[Title] OR blaOXA-1205		OR076750;NG_203408
+OXA-1207	OXA-1207;blaOXA-1207;bla_OXA-1207	2026-04-10	OXA-1207[Title] OR blaOXA-1207		OR139853;NG_203409
+OXA-1226	OXA-1226;blaOXA-1226;bla_OXA-1226	2026-04-10	OXA-1226[Title] OR blaOXA-1226		PP296992;NG_242576
+FosA12	FosA12;fosA12	2026-04-15	fosA12[Title] OR PQ518868[Accession]		PQ518868;NG_247254
+Ngt-1	Ngt-1;ngt-1	2026-04-22	Ngt-1[Title] OR ngt-1[Title]	glycosyltransferase|novobiocin|fidaxomicin|antibiotic|resistance	
+SHV-248	SHV-248;blaSHV-248;bla_SHV-248	2026-04-30	SHV-248[Title] OR blaSHV-248		PV075180;NG_244643
+OXA-1054	OXA-1054;blaOXA-1054;bla_OXA-1054	2026-05-04	OXA-1054[Title] OR blaOXA-1054		OM322820
+OXA-1422	OXA-1422;blaOXA-1422;bla_OXA-1422	2026-05-05	OXA-1422[Title] OR blaOXA-1422		PX549427;NG_247283
+HMB-3	HMB-3;blaHMB-3;bla_HMB-3	2026-05-05	HMB-3[Title] OR blaHMB-3	beta-lactamase|metallo|blaHMB|Pseudomonas	PV035090;NG_244511
+KPC-160	KPC-160;blaKPC-160;bla_KPC-160	2026-05-06	KPC-160[Title] OR blaKPC-160		OQ579136;NG_157009
+mcr-10.6	mcr-10.6	2026-05-24	mcr-10.6[Title]	mcr-10.6|phosphoethanolamine|Enterobacter	NG_246066
+ant(9)-Ie	ant(9)-Ie;ANT(9)-Ie;ant9-Ie	2026-06-02	ant(9)-Ie[Title] OR PX485636[Accession]		PX485636
+BAS-1	BAS-1;blaBAS-1;blaBAS	2026-06-15	blaBAS-1 OR ("BAS-1"[Title] AND beta-lactamase)	beta-lactamase|blaBAS|Bacteroides	NG_247365
+GUA-1	GUA-1;blaGUA-1;blaGUA	2026-06-30	blaGUA-1 OR ("GUA-1"[Title] AND beta-lactamase)	beta-lactamase|blaGUA|ESBL|Pseudomonas	NG_247371
+Lsa(F)	Lsa(F);LsaF;lsa(F);lsaF	2026-07-07	Lsa(F)[Title] OR lsaF[Title]	pleuromutilin|lincosamide|streptogramin|resistance|Streptococcus	
+mcr-12	mcr-12;mcr-12.1	2026-07-15	mcr-12[Title] OR mcr-12.1[Title]	mcr-12 gene|MCR-12.1|phosphoethanolamine|Pigmentiphaga|polymyxin resistance	NG_245195
