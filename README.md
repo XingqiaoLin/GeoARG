@@ -196,8 +196,7 @@ GeoARG/
 ├── utils.py        # Metrics, seed, sequence utilities
 ├── workflow.png    # Architecture figure
 ├── checkpoints/    # Saved model weights (.safetensors)
-├── .cursor/skills/novel-arg-watch/  # Cursor skill: date-gate novel ARG literature
-└── .agents/skills/novel-arg-watch/  # Codex pointer to the same skill
+└── skills/novel-arg-watch/  # Date-gated novel ARG literature skill
 ```
 
 > 💾 Model weights available at [zenodo.org/records/19295211](https://zenodo.org/records/19295211)
@@ -219,13 +218,10 @@ Accepts FASTA input · Returns ARG probability, predicted resistance class, and 
 `novel-arg-watch` searches papers after a cutoff date and cross-validates first public appearance. A formal paper after the cutoff is not enough if a preprint or earlier article already named the same ARG.
 
 ```bash
-python .cursor/skills/novel-arg-watch/scripts/verify.py
+python skills/novel-arg-watch/scripts/verify.py
 ```
 
-| Tool | Path |
-|------|------|
-| Cursor | `.cursor/skills/novel-arg-watch/` |
-| Codex | `.agents/skills/novel-arg-watch/` |
+All skill files live at [`skills/novel-arg-watch/`](https://github.com/XingqiaoLin/GeoARG/tree/main/skills/novel-arg-watch). Cursor and Codex load that folder through local links.
 
 Scripts in the skill never mark a gene as a finished novel ARG. Sequence download is not part of the default run.
 

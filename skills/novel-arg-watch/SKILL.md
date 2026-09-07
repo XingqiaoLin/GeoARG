@@ -25,6 +25,7 @@ This folder is the whole skill. Copy it, or open a repo that already contains it
 
 | Tool | Where it should live |
 | --- | --- |
+| This repo | `skills/novel-arg-watch/` |
 | Cursor | `.cursor/skills/novel-arg-watch/` |
 | Codex | `.agents/skills/novel-arg-watch/` or `~/.codex/skills/novel-arg-watch/` |
 
