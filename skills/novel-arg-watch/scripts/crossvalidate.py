@@ -28,6 +28,7 @@ from lib import (
     PRECISION_DAY,
     SKILL_VERSION,
     clean,
+    dedup_key,
     epmc_search,
     eutils_esearch,
     eutils_esummary,
@@ -247,7 +248,7 @@ def review_one(
             continue
         if context_re and not context_re.search(blob):
             continue
-        key = (row.get("doi") or "").lower() or f"{row.get('source')}:{row.get('id')}"
+        key = dedup_key(row)
         if key in seen_keys:
             continue
         seen_keys.add(key)

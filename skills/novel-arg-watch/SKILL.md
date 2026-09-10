@@ -5,7 +5,8 @@ description: >-
   resistance genes (ARGs). Accepts a cutoff date, retrieves later papers, screens
   candidates, then flags any named gene whose preprint or earlier article predates
   the cutoff. Also quotes the full-text sentence that proves a gene was
-  experimentally validated at the gene level. Use when the user asks to find novel
+  experimentally validated at the gene level, and can search RefSeq protein and
+  nucleotide records by gene name, alias, or accession. Use when the user asks to find novel
   ARGs after a date, watch new resistance genes, cross-validate preprints vs formal
   papers, check whether a resistance gene was functionally confirmed, or continue a
   novel-ARG literature audit.
@@ -19,7 +20,7 @@ Search papers on or after a user-specified date, then decide novelty by **first 
 
 只有论文正文里能引到"这个基因导致耐药"的原句，才算实验验证过的 ARG。摘要里的说法不算。
 
-Scripts never emit a finished novel-ARG conclusion. `novel_for_cutoff` stays false. Sequence fetch is not part of the default run.
+Scripts never emit a finished novel-ARG conclusion. `novel_for_cutoff` stays false. RefSeq search is part of every default run once candidate genes have been named.
 
 `$SKILL_DIR` is the folder that contains this `SKILL.md`. Run every command from the user's workspace with that path. Do not hard-code `.cursor` or `novel/`.
 
@@ -61,17 +62,17 @@ If the user gives only one date, treat it as `--since`.
 
 ## Workflow
 
-Copy and track. Stop after step 6 unless the user asked for sequences.
+Copy and track. Run all steps for every date-bounded audit.
 
 ```
 - [ ] 0. python $SKILL_DIR/scripts/verify.py
-- [ ] 1. Search after --since
+- [ ] 1. Search after --since; if zero records, run the bounded retrieval fallback
 - [ ] 2. Screen candidates (keyword != novel ARG)
 - [ ] 3. Extract named gene objects
-- [ ] 4. Cross-validate first public date (date gate)
-- [ ] 5. Validate experimental evidence from full text (evidence gate)
-- [ ] 6. Read the quotes and classify (human)
-- [ ] 7. Sequences only if the user asked
+- [ ] 4. Search RefSeq Protein and Nucleotide for every named candidate
+- [ ] 5. Cross-validate first public date (date gate)
+- [ ] 6. Validate experimental evidence from full text (evidence gate)
+- [ ] 7. Read the quotes and RefSeq matches, then classify (human)
 ```
 
 ### 1. Search after the cutoff
@@ -109,6 +110,44 @@ python $SKILL_DIR/scripts/search_after_date.py --since YYYY-MM-DD \
 - Read `search_audit.json`. If `search_complete` is false, later “no hit” is `insufficient_evidence`, not absence.
 - Non-zero exit: do not treat the hit table as a finished search.
 
+#### If retrieval returns zero results
+
+An empty `search_hits.tsv` never means “no novel ARG exists.” First read
+`search_audit.json`, especially `retrieval_status`, `search_complete`, `errors`, and
+the per-query `complete` / `truncated` fields.
+
+Use this bounded fallback; do not retry indefinitely:
+
+1. If `retrieval_status=incomplete`, repair the failed retrieval before changing
+   the biological query: retry the failed source, raise `--max-pages` or
+   `--max-records` when truncated, or run the reachable source alone. If a complete
+   run cannot be obtained, stop with `insufficient_evidence`.
+2. If `retrieval_status=complete_zero_hits` from `broad`, rerun once with
+   `--profile max`. Keep Europe PMC and PubMed unless one is unavailable.
+3. If the complete `max` run is also empty, perform one query-expansion round.
+   Add the user's organism, drug class, gene family, aliases, or accession when
+   known. Relax novelty words such as `novel` / `new`, but keep resistance plus a
+   gene-, enzyme-, or function-level term. Supply these as repeatable
+   `--extra-query` values or a `--query-file`; these additions are queried through
+   Europe PMC, while PubMed still uses the `max` profile.
+4. If that complete expanded run is still empty, stop and report
+   `no_candidates_retrieved` with the date window, sources, profiles, and added
+   terms. Do not run screening, date-gate, or evidence-gate steps without a named
+   candidate, and do not convert zero retrieval into a biological absence claim.
+
+If the user supplied a gene name or accession, use it and its spelling variants in
+the expansion round. Never invent a gene, paper, accession, or matched skill to
+escape a zero-result state.
+
+Example max retry:
+
+```bash
+python $SKILL_DIR/scripts/search_after_date.py \
+  --since YYYY-MM-DD --until YYYY-MM-DD \
+  --profile max \
+  --output-dir path/to/watch_YYYY-MM-DD
+```
+
 ### 2. Screen; do not promote keyword hits
 
 ```bash
@@ -140,7 +179,42 @@ One named gene = one object. Merge papers that characterize the same name. Split
 
 Write a genes TSV (`gene`, `aliases`, `formal_date`, `ncbi_term`, optional `context`, optional `accessions`). See [examples/priority_genes.2026-03-29.tsv](examples/priority_genes.2026-03-29.tsv). Always put known accessions in `accessions`; name search alone can miss them.
 
-### 4. Cross-validate (required; this is the date gate)
+### 4. Search RefSeq (required)
+
+After naming candidate genes, search RefSeq Protein and Nucleotide for every
+candidate even when the user supplied only a date window:
+
+```bash
+python $SKILL_DIR/scripts/search_refseq.py \
+  --genes path/to/genes.tsv \
+  --db both \
+  --output path/to/watch_YYYY-MM-DD/refseq_hits.tsv
+```
+
+For an individual name or accession, use repeatable `--term` and `--accession`
+arguments:
+
+```bash
+python $SKILL_DIR/scripts/search_refseq.py \
+  --term OXA-1422 --accession NG_247283 \
+  --output path/to/refseq_hits.tsv
+```
+
+The search covers both RefSeq Protein and Nucleotide by default and restricts every
+Entrez query with `srcdb_refseq[PROP]`. Use `--db protein` or `--db nuccore` to
+narrow it. A genes TSV contributes its `gene`, `aliases`, and `accessions` values.
+The output reports accession, title, organism, sequence length, and record dates;
+`*.run.json` records every query and whether it was complete. If a query exceeds
+`--max-results`, the script writes the retrieved rows but exits non-zero rather than
+silently treating them as exhaustive.
+
+RefSeq metadata are sequence-record evidence, not naming-time proof. A current
+RefSeq title and `CreateDate` must not be used to claim that the gene name existed
+on that date or to make a novelty decision.
+
+If the user does ask for sequences, the accession has to be the object the paper validated: the mutant rather than the wild type, the annotated full-length CDS rather than an internal start an ORF caller preferred. See [reference.md](reference.md).
+
+### 5. Cross-validate (required; this is the date gate)
 
 ```bash
 python $SKILL_DIR/scripts/crossvalidate.py \
@@ -164,7 +238,7 @@ Europe PMC and PubMed are both queried per gene; `--no-pubmed` narrows it to Eur
 
 `first_public_date` is literature plus formal day dates only. Current-title nuccore dates go in `earliest_current_named_nuccore_date`.
 
-### 5. Validate the experiment (required; this is the evidence gate)
+### 6. Validate the experiment (required; this is the evidence gate)
 
 ```bash
 python $SKILL_DIR/scripts/validate_evidence.py \
@@ -202,15 +276,17 @@ Two extra guards, both deliberate:
 
 A `pass` means a quotable sentence exists, not that a human agreed with it. Golden cases: `$SKILL_DIR/examples/evidence_cases.tsv`.
 
-### 6. Read the quotes and classify
+### 7. Read the quotes and RefSeq matches, then classify
 
-Read [reference.md](reference.md) before calling anything “novel ARG”. Open every `pass` row and read `quote`, then `supporting_quotes`. Confirm the sentence is about **this** gene and that the control is an empty vector or a parent strain. Only then may a human set `review_complete`.
+Read [reference.md](reference.md) before calling anything “novel ARG”. Open every
+`pass` row and read `quote`, then `supporting_quotes`. Confirm the sentence is
+about **this** gene and that the control is an empty vector or a parent strain.
+Review the corresponding `refseq_hits.tsv` rows and verify that any accession
+carried forward represents the experimentally tested gene object. Record
+`no_refseq_match` when no RefSeq record is found; do not substitute a GenBank hit
+or infer an accession. Only then may a human set `review_complete`.
 
 `no_earlier_record_found` on its own is not review-complete and is not a novel ARG.
-
-### 7. Sequences only if asked
-
-Do not start sequence download after a date-only request. Sequence helpers are not in this skill package.
 
 ## Output
 
@@ -218,6 +294,36 @@ Lead with DROP, then HOLD, then OPEN. Never present the search-hit count as the 
 
 Never present `screen_score` as a novelty score; it only orders the reading queue.
 
+When `retrieval_status=complete_zero_hits` persists after the bounded fallback,
+report `no_candidates_retrieved`, not “no novel ARGs found.” When
+`retrieval_status=incomplete`, report `insufficient_evidence` and the failed or
+truncated sources.
+
 When you report a validated gene, quote the sentence and name its section. A validation claim with no quote behind it is not reportable.
+
+### Compact JSONL response
+
+When the user asks for JSON or JSONL, emit one valid JSON object per line, with no
+surrounding array. Use the compact nested form below only for a human-reviewed gene
+that passed both gates:
+
+```json
+{"gene":"KPC-249","publication":{"first_public_date":"2026-02-27"},"sequence":{"accession":"PQ763404.1","nucleotide":"ATGTCACGCCGTCT...GGCAGTAA"}}
+```
+
+- `publication.first_public_date` is the earliest verified public literature date,
+  including a preprint when it came first; it is not automatically the formal
+  journal date.
+- Include `sequence` only when the user requested sequence retrieval and the
+  accession refers to the experimentally validated gene object. Otherwise set
+  `sequence` to `null`; never guess an accession or nucleotide string.
+- In a slide, chat preview, or schematic, the nucleotide string may be shortened
+  with `...`. In a saved JSONL deliverable it must be the complete uppercase IUPAC
+  nucleotide sequence without ellipsis.
+- Keep the quoted experimental evidence, gate decisions, source identifiers, and
+  provenance in the corresponding TSV/run files even when the displayed JSONL is
+  compact.
+- DROP, HOLD, `insufficient_evidence`, and `no_candidates_retrieved` outcomes are
+  status records, not validated-ARG objects; do not force them into this schema.
 
 Each row carries `skill_version` and `run_id`. `*.run.json` also records `argv`, Python version, and SHA-256 of the skill files. Re-running the same output path moves the previous file to `*.bak-<run_id>.*` instead of overwriting it. Month/year dates stay in `formal_date_raw`; `formal_date` is day-precision only.

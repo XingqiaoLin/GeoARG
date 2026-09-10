@@ -324,6 +324,12 @@ def main() -> None:
     write_tsv(tsv, records, HIT_FIELDS)
 
     search_complete = bool(stats) and all(item["complete"] for item in stats) and not errors
+    if not search_complete:
+        retrieval_status = "incomplete"
+    elif records:
+        retrieval_status = "complete_with_hits"
+    else:
+        retrieval_status = "complete_zero_hits"
     code = exit_code_for_run(errors=errors, incomplete=not search_complete)
     with_abstract = sum(1 for r in records if r["abstract"])
     audit = provenance("search_after_date.py")
@@ -350,6 +356,7 @@ def main() -> None:
             "queries": stats,
             "errors": errors,
             "search_complete": search_complete,
+            "retrieval_status": retrieval_status,
             "rotated_previous": rotated,
             "exit_code": code,
         }
@@ -362,6 +369,7 @@ def main() -> None:
     print(f"in_window: {audit['window_counts']}")
     print(f"preprints: {audit['preprints']}")
     print(f"search_complete: {audit['search_complete']}")
+    print(f"retrieval_status: {audit['retrieval_status']}")
     print(f"wrote {tsv}")
     if rotated:
         print("rotated previous: " + "; ".join(rotated))

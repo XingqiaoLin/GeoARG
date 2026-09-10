@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crossvalidate
+import search_refseq
 import search_after_date
 import validate_evidence
 from crossvalidate import OUTPUT_FIELDS, classify, dump, flag_label
@@ -317,6 +318,29 @@ PUBMED_XML = """<PubmedArticleSet><PubmedArticle>
 </ArticleIdList></PubmedData>
 </PubmedArticle></PubmedArticleSet>"""
 
+# Same shape PubMed returns for a record that ships its reference list: every
+# cited paper carries its own doi and pmc ID after the record's own IDs.
+PUBMED_XML_WITH_REFERENCES = """<PubmedArticleSet><PubmedArticle>
+<MedlineCitation><PMID>42313100</PMID><Article>
+<Journal><Title>Antimicrob Agents Chemother</Title></Journal>
+<ArticleTitle>A newly identified SxtPR efflux system</ArticleTitle>
+<Abstract><AbstractText>Deletion raised susceptibility.</AbstractText></Abstract>
+<ArticleDate DateType="Electronic"><Year>2026</Year><Month>04</Month><Day>16</Day></ArticleDate>
+<PublicationTypeList><PublicationType>Journal Article</PublicationType></PublicationTypeList>
+</Article></MedlineCitation>
+<PubmedData><ArticleIdList>
+<ArticleId IdType="doi">10.1128/aac.01644-25</ArticleId>
+<ArticleId IdType="pmc">PMC13436341</ArticleId>
+</ArticleIdList>
+<ReferenceList>
+<Reference><Citation>An unrelated 2014 paper</Citation><ArticleIdList>
+<ArticleId IdType="pubmed">25182064</ArticleId>
+<ArticleId IdType="doi">10.1093/jac/dku340</ArticleId>
+<ArticleId IdType="pmc">PMC11672700</ArticleId>
+</ArticleIdList></Reference>
+</ReferenceList></PubmedData>
+</PubmedArticle></PubmedArticleSet>"""
+
 
 def test_query_profiles() -> None:
     counts = {}
@@ -364,6 +388,69 @@ def test_alias_variants_drop_hyphen() -> None:
     check("mcr10.6" in alias_variants("mcr-10.6"), alias_variants("mcr-10.6"))
 
 
+def test_refseq_query_is_restricted() -> None:
+    by_name = search_refseq.refseq_query("blaOXA-1422")
+    check('"blaOXA-1422"[All Fields]' in by_name, by_name)
+    check("srcdb_refseq[PROP]" in by_name, by_name)
+    by_accession = search_refseq.refseq_query("WP_000027057.1", accession=True)
+    check('"WP_000027057.1"[Accession]' in by_accession, by_accession)
+    check("srcdb_refseq[PROP]" in by_accession, by_accession)
+
+
+def test_refseq_loads_gene_aliases_and_accessions() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        genes = Path(tmp) / "genes.tsv"
+        genes.write_text(
+            "gene\taliases\taccessions\n"
+            "OXA-1422\tOXA-1422;blaOXA-1422\tNG_247283;WP_000027057.1\n",
+            encoding="utf-8",
+        )
+        specs = search_refseq.load_specs([], [], genes)
+    got = {(row["term"], row["query_source"]) for row in specs}
+    for expected in (
+        ("OXA-1422", "gene_or_alias"),
+        ("blaOXA-1422", "gene_or_alias"),
+        ("NG_247283", "accession"),
+        ("WP_000027057.1", "accession"),
+    ):
+        check(expected in got, f"missing {expected}: {got}")
+
+
+def test_refseq_summary_and_alias_merge() -> None:
+    spec_a = {
+        "input_gene": "TEM-1",
+        "term": "TEM-1",
+        "query_source": "gene_or_alias",
+    }
+    spec_b = {
+        "input_gene": "TEM-1",
+        "term": "blaTEM-1",
+        "query_source": "gene_or_alias",
+    }
+    item = {
+        "uid": "445949202",
+        "accessionversion": "WP_000027057.1",
+        "title": "MULTISPECIES: broad-spectrum class A beta-lactamase TEM-1 [Bacteria]",
+        "organism": "Bacteria",
+        "taxid": 2,
+        "slen": 286,
+        "moltype": "aa",
+        "completeness": "complete",
+        "createdate": "2013/02/04",
+        "updatedate": "2022/10/10",
+        "sourcedb": "refseq",
+    }
+    rows = [
+        search_refseq.summary_row(item, spec_a, "protein", "run"),
+        search_refseq.summary_row(item, spec_b, "protein", "run"),
+    ]
+    merged = search_refseq.merge_rows(rows)
+    check(len(merged) == 1, merged)
+    check(merged[0]["accession"] == "WP_000027057.1", merged[0])
+    check(merged[0]["length"] == "286", merged[0])
+    check(merged[0]["matched_terms"] == "TEM-1;blaTEM-1", merged[0])
+
+
 def test_pubmed_xml_parse() -> None:
     rows = parse_pubmed_xml(PUBMED_XML)
     check(len(rows) == 1, rows)
@@ -375,6 +462,23 @@ def test_pubmed_xml_parse() -> None:
     check("MICs" in row["abstractText"], row)
     check(row["pubTypeList"]["pubType"] == ["Journal Article"], row)
     check(row["journalInfo"]["journal"]["title"] == "Microorganisms", row)
+
+
+def test_pubmed_ids_ignore_reference_list() -> None:
+    """Real miss: the DOI and PMCID came from the last cited reference."""
+    row = parse_pubmed_xml(PUBMED_XML_WITH_REFERENCES)[0]
+    check(row["pmid"] == "42313100", row)
+    check(row["doi"] == "10.1128/aac.01644-25", f"reference DOI leaked: {row['doi']}")
+    check(row["pmcid"] == "PMC13436341", f"reference PMCID leaked: {row['pmcid']}")
+    check(row["firstPublicationDate"] == "2026-04-16", row)
+    check(row["pubTypeList"]["pubType"] == ["Journal Article"], row)
+
+
+def test_two_papers_citing_one_reference_stay_separate() -> None:
+    """A leaked reference DOI collapsed unrelated records into one date-gate row."""
+    first = parse_pubmed_xml(PUBMED_XML)[0]
+    second = parse_pubmed_xml(PUBMED_XML_WITH_REFERENCES)[0]
+    check(dedup_key(first) != dedup_key(second), (dedup_key(first), dedup_key(second)))
 
 
 def test_dedup_key() -> None:
@@ -697,7 +801,12 @@ def main() -> None:
     test_query_covers_more_classes()
     test_alias_variants()
     test_alias_variants_drop_hyphen()
+    test_refseq_query_is_restricted()
+    test_refseq_loads_gene_aliases_and_accessions()
+    test_refseq_summary_and_alias_merge()
     test_pubmed_xml_parse()
+    test_pubmed_ids_ignore_reference_list()
+    test_two_papers_citing_one_reference_stay_separate()
     test_dedup_key()
     test_date_clauses()
     test_extra_queries()

@@ -1,6 +1,6 @@
 interface:
   display_name: "Novel ARG watch"
-  short_description: "Date-gate novel resistance genes and quote the validating experiment"
-  default_prompt: "Use $novel-arg-watch to search antimicrobial resistance genes after a cutoff date, cross-validate preprints before treating any gene as novel, and quote the full-text sentence that proves each gene was experimentally validated."
+  short_description: "Date-gate ARGs, verify experiments, and search RefSeq"
+  default_prompt: "Use $novel-arg-watch to find ARGs after a cutoff date, search their RefSeq records, cross-validate earlier reports, and verify gene-level experimental evidence."
 policy:
   allow_implicit_invocation: true

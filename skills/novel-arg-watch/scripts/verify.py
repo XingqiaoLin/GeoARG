@@ -41,6 +41,7 @@ def check_frontmatter() -> None:
         "crossvalidate.py",
         "screen_candidates.py",
         "validate_evidence.py",
+        "search_refseq.py",
         "queries.py",
         "lib.py",
         "install.py",
@@ -66,7 +67,13 @@ def check_scripts_have_help() -> None:
     """Anyone picking this up should be able to read --help without a network."""
     import subprocess
 
-    for name in ("search_after_date.py", "screen_candidates.py", "crossvalidate.py", "validate_evidence.py"):
+    for name in (
+        "search_after_date.py",
+        "screen_candidates.py",
+        "crossvalidate.py",
+        "validate_evidence.py",
+        "search_refseq.py",
+    ):
         proc = subprocess.run(
             [sys.executable, str(SCRIPTS / name), "--help"],
             capture_output=True,

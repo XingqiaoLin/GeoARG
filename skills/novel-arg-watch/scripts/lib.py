@@ -21,9 +21,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-UA = "GeoARG-novel-arg-watch/1.4.0"
+UA = "GeoARG-novel-arg-watch/1.5.1"
 SKILL_NAME = "novel-arg-watch"
-SKILL_VERSION = "1.4.0"
+SKILL_VERSION = "1.5.1"
 MIN_PYTHON = (3, 9)
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -235,9 +235,27 @@ def _xml_text(node) -> str:
     return clean("".join(node.itertext()))
 
 
+def _own_article_id(article, id_type: str) -> str:
+    """An ID from this record's own list, taken first.
+
+    `.//ArticleId` also reaches PubmedData/ReferenceList, where every cited
+    paper carries its own doi and pmc ID. Reading the last match there put a
+    reference's DOI on the record and a reference's PMCID in front of the
+    full-text fetch.
+    """
+    for node in article.findall(f'./PubmedData/ArticleIdList/ArticleId[@IdType="{id_type}"]'):
+        text = _xml_text(node)
+        if text:
+            return text
+    return ""
+
+
 def _pubmed_article_date(article) -> str:
     """Electronic article date first, then the print issue date."""
-    for path in ('.//ArticleDate[@DateType="Electronic"]', ".//ArticleDate"):
+    for path in (
+        './MedlineCitation/Article/ArticleDate[@DateType="Electronic"]',
+        "./MedlineCitation/Article/ArticleDate",
+    ):
         node = article.find(path)
         if node is not None:
             year = _xml_text(node.find("Year"))
@@ -245,11 +263,11 @@ def _pubmed_article_date(article) -> str:
             day = _xml_text(node.find("Day"))
             if year and month and day:
                 return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-    node = article.find(".//Journal/JournalIssue/PubDate")
+    node = article.find("./MedlineCitation/Article/Journal/JournalIssue/PubDate")
     if node is None:
-        node = article.find('.//PubMedPubDate[@PubStatus="epublish"]')
+        node = article.find('./PubmedData/History/PubMedPubDate[@PubStatus="epublish"]')
     if node is None:
-        node = article.find('.//PubMedPubDate[@PubStatus="pubmed"]')
+        node = article.find('./PubmedData/History/PubMedPubDate[@PubStatus="pubmed"]')
     if node is None:
         return ""
     year = _xml_text(node.find("Year"))
@@ -274,17 +292,21 @@ def parse_pubmed_xml(text: str) -> list[dict]:
     root = ET.fromstring(text)
     rows: list[dict] = []
     for article in root.findall(".//PubmedArticle"):
-        pmid = _xml_text(article.find(".//PMID"))
-        doi = ""
-        for node in article.findall('.//ArticleId[@IdType="doi"]'):
-            doi = _xml_text(node)
-        pmcid = ""
-        for node in article.findall('.//ArticleId[@IdType="pmc"]'):
-            pmcid = _xml_text(node)
+        pmid = _xml_text(article.find("./MedlineCitation/PMID"))
+        doi = _own_article_id(article, "doi") or _xml_text(
+            article.find('./MedlineCitation/Article/ELocationID[@EIdType="doi"]')
+        )
+        pmcid = _own_article_id(article, "pmc")
         abstract = " ".join(
-            _xml_text(node) for node in article.findall(".//Abstract/AbstractText")
+            _xml_text(node)
+            for node in article.findall("./MedlineCitation/Article/Abstract/AbstractText")
         ).strip()
-        types = [_xml_text(node) for node in article.findall(".//PublicationType")]
+        types = [
+            _xml_text(node)
+            for node in article.findall(
+                "./MedlineCitation/Article/PublicationTypeList/PublicationType"
+            )
+        ]
         rows.append(
             {
                 "id": pmid,
@@ -292,9 +314,13 @@ def parse_pubmed_xml(text: str) -> list[dict]:
                 "pmid": pmid,
                 "pmcid": pmcid,
                 "doi": doi,
-                "title": _xml_text(article.find(".//ArticleTitle")),
+                "title": _xml_text(article.find("./MedlineCitation/Article/ArticleTitle")),
                 "abstractText": abstract,
-                "journalInfo": {"journal": {"title": _xml_text(article.find(".//Journal/Title"))}},
+                "journalInfo": {
+                    "journal": {
+                        "title": _xml_text(article.find("./MedlineCitation/Article/Journal/Title"))
+                    }
+                },
                 "firstPublicationDate": _pubmed_article_date(article),
                 "pubTypeList": {"pubType": types},
             }
@@ -501,6 +527,7 @@ def provenance(script: str) -> dict[str, Any]:
         "search_after_date.py",
         "screen_candidates.py",
         "validate_evidence.py",
+        "search_refseq.py",
         "SKILL.md",
     ]
     hashes = {}

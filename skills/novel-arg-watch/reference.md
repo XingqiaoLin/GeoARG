@@ -73,6 +73,19 @@ Two failure modes this gate is tuned against, both found on real papers:
 
 Both are pinned by fixtures in `examples/evidence_cases.tsv`.
 
+## The sequence you carry forward is not always the validated object
+
+A paper can pass both gates and still not validate the accession you are holding. Check the identity of the sequence, not just the gene name:
+
+- **MPN_080**: the phenotype belongs to the RC267 variant carrying T752N and T1074I in a 1385-aa ATPase. The text states that overexpressing wild-type MPN_080 did not raise the MIC, so the wild-type reference protein is not validated evidence — and a 572-aa ABC-transporter homolog cannot even hold residue 752 or 1074.
+- **BAS-1**: an ab-initio CDS caller picked an internal start on `NG_247365.1` and returned 282 aa. The annotated CDS is 870 nt / 289 aa and begins `MRNIILP`. The experiments used the full-length protein.
+
+So: mutant versus wild type, full length versus internal start, and residue numbering that the sequence can actually support.
+
+## Record IDs come from the record, not its references
+
+PubMed `efetch` ships the reference list inside each `PubmedArticle`. `.//ArticleId` therefore also matches every cited paper. Read `PubmedData/ArticleIdList` and fall back to `ELocationID`; on 3,097 saved records the unscoped path put a cited paper's DOI or PMCID on 1,943 of them, which both mislabels dates and can send a full-text fetch to the wrong article.
+
 ## Coverage
 
 Recall comes before precision in retrieval, because a paper the sweep never returned cannot be recovered later, while a false positive is dropped in one screening pass.
